@@ -64,6 +64,7 @@ class PollingService {
    */
   async poll() {
     if (!this.io || !this.sessionStore) {
+      console.warn('[PollingService] Poll skipped: missing io or sessionStore');
       return;
     }
 

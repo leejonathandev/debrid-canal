@@ -32,11 +32,13 @@ app.use((req, _res, next) => {
 });
 
 // Session configuration
+const sessionStore = new session.MemoryStore();
 const sessionMiddleware = session({
   name: "debrid_canal",
   secret: process.env.SESSION_SECRET || "debrid-canal-secret",
   resave: false,
   saveUninitialized: true,
+  store: sessionStore,
   cookie: {
     httpOnly: true,
     sameSite: "lax",
@@ -92,9 +94,6 @@ io.on('connection', (socket) => {
     console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
   });
 });
-
-// Get session store
-const sessionStore = sessionMiddleware.store || app.locals.sessionStore;
 
 // Initialize polling service
 pollingService.initialize(io, sessionStore);
