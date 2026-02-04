@@ -4,8 +4,11 @@ const statusEl = document.getElementById("status");
 const torrentList = document.getElementById("torrent-list");
 const magnetText = document.getElementById("magnet-text");
 const magnetSubmit = document.getElementById("magnet-submit");
+const rateLimitBanner = document.getElementById("rate-limit-banner");
+const rateLimitCountdown = document.getElementById("rate-limit-countdown");
 
-const POLL_INTERVAL = 5000;
+// Initialize Socket.IO connection
+const socket = io();
 
 const setStatus = (message, type = "info") => {
   statusEl.textContent = message;
@@ -44,16 +47,6 @@ const submitMagnet = async (magnet) => {
   if (!response.ok) {
     const data = await response.json();
     throw new Error(data.error || "Magnet submission failed");
-  }
-
-  return response.json();
-};
-
-const fetchTorrents = async (refresh = false) => {
-  const response = await fetch(`/api/torrents?refresh=${refresh ? 1 : 0}`);
-
-  if (!response.ok) {
-    throw new Error("Failed to load torrents.");
   }
 
   return response.json();
@@ -106,7 +99,6 @@ const handleDrop = async (event) => {
       setStatus("Uploading torrent file...");
       await uploadTorrent(files[0]);
       setStatus("Torrent uploaded. Tracking status.");
-      await refreshAndRender();
       return;
     }
 
@@ -125,7 +117,6 @@ const handleDrop = async (event) => {
             setStatus("Submitting magnet link...");
             await submitMagnet(text.trim());
             setStatus("Magnet submitted. Tracking status.");
-            await refreshAndRender();
           } catch (error) {
             setStatus(error.message, "error");
           }
@@ -145,7 +136,6 @@ const handleFilePick = async (event) => {
     setStatus("Uploading torrent file...");
     await uploadTorrent(file);
     setStatus("Torrent uploaded. Tracking status.");
-    await refreshAndRender();
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
@@ -166,7 +156,6 @@ const handleMagnetSubmit = async () => {
     await submitMagnet(magnet);
     magnetText.value = "";
     setStatus("Magnet submitted. Tracking status.");
-    await refreshAndRender();
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
@@ -174,10 +163,49 @@ const handleMagnetSubmit = async () => {
   }
 };
 
-const refreshAndRender = async () => {
-  const torrents = await fetchTorrents(true);
-  renderTorrents(torrents);
-};
+// Socket.IO event handlers
+socket.on('connect', () => {
+  console.log('[Socket.IO] Connected');
+});
+
+socket.on('disconnect', () => {
+  console.log('[Socket.IO] Disconnected');
+});
+
+socket.on('torrents-updated', (data) => {
+  renderTorrents(data.torrents || []);
+  
+  if (data.allComplete) {
+    setStatus("All torrents downloaded.");
+  }
+});
+
+let rateLimitInterval = null;
+
+socket.on('rate-limit-hit', (data) => {
+  let timeRemaining = data.timeRemaining || 60;
+  
+  // Show rate limit banner
+  rateLimitBanner.style.display = 'block';
+  rateLimitCountdown.textContent = timeRemaining;
+  
+  // Clear any existing interval
+  if (rateLimitInterval) {
+    clearInterval(rateLimitInterval);
+  }
+  
+  // Update countdown every second
+  rateLimitInterval = setInterval(() => {
+    timeRemaining--;
+    rateLimitCountdown.textContent = timeRemaining;
+    
+    if (timeRemaining <= 0) {
+      rateLimitBanner.style.display = 'none';
+      clearInterval(rateLimitInterval);
+      rateLimitInterval = null;
+    }
+  }, 1000);
+});
 
 const init = async () => {
   dropZone.addEventListener("click", () => fileInput.click());
@@ -206,20 +234,8 @@ const init = async () => {
     }
   });
 
-  try {
-    const torrents = await fetchTorrents(false);
-    renderTorrents(torrents);
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-
-  setInterval(async () => {
-    try {
-      await refreshAndRender();
-    } catch (error) {
-      setStatus(error.message, "error");
-    }
-  }, POLL_INTERVAL);
+  // Initial status
+  setStatus("Connected. Waiting for updates...");
 };
 
 init();
