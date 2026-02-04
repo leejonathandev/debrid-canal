@@ -93,17 +93,15 @@ const normalizeListItem = (item) => {
   return normalized;
 };
 
-export const listTorrents = async ({ offset = 0, limit = 100, filter } = {}) => {
-  const params = new URLSearchParams({
-    offset: String(offset),
-    limit: String(limit)
-  });
+export const listTorrents = async ({ filter } = {}) => {
+  const params = new URLSearchParams();
 
   if (filter) {
     params.set("filter", filter);
   }
 
-  const response = await client.get(`/torrents?${params.toString()}`);
+  const queryString = params.toString();
+  const response = await client.get(queryString ? `/torrents?${queryString}` : "/torrents");
 
   // HTTP 204 (No Content) or empty response means no torrents
   if (response.status === 204 || !response.data) {

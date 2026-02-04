@@ -103,10 +103,7 @@ class PollingService {
       try {
         if (rateLimitMonitor.canMakeRequest()) {
           rateLimitMonitor.recordRequest();
-          accountTorrents = await realDebridService.listTorrents({
-            offset: 0,
-            limit: 100
-          });
+          accountTorrents = await realDebridService.listTorrents();
         } else {
           console.log('[PollingService] Rate limit reached, skipping listTorrents');
         }
