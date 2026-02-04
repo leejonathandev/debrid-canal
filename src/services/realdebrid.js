@@ -1,6 +1,7 @@
 import axios from "axios";
 import FormData from "form-data";
 import dotenv from "dotenv";
+import rateLimitMonitor from "./rateLimitMonitor.js";
 
 dotenv.config();
 
@@ -19,6 +20,26 @@ const client = axios.create({
   },
   timeout: 30000
 });
+
+// Add response interceptor to handle rate limiting
+client.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Check for HTTP 429 rate limit error
+    if (error.response && error.response.status === 429) {
+      console.error('[RealDebrid] HTTP 429 - Rate limit exceeded');
+      rateLimitMonitor.markRateLimitHit();
+      
+      // Create a more informative error
+      const rateLimitError = new Error('Rate limit exceeded. Please wait before making more requests.');
+      rateLimitError.isRateLimit = true;
+      rateLimitError.status = 429;
+      throw rateLimitError;
+    }
+    
+    throw error;
+  }
+);
 
 const normalizeInfo = (info) => {
   return {
