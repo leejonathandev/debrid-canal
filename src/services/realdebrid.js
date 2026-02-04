@@ -29,7 +29,15 @@ client.interceptors.response.use(
     console.log(`[RealDebrid API] ${method} ${url} -> ${response.status}`);
     
     if (DEBUG) {
-      console.log(`[RealDebrid API DEBUG] Full response:`, JSON.stringify(response.data, null, 2));
+      console.log(`[RealDebrid API DEBUG] Full response for ${url}:`);
+      if (Array.isArray(response.data)) {
+        console.log(`[RealDebrid API DEBUG] Array with ${response.data.length} items:`);
+        response.data.forEach((item, index) => {
+          console.log(`[RealDebrid API DEBUG] Item ${index}:`, JSON.stringify(item, null, 2));
+        });
+      } else {
+        console.log(JSON.stringify(response.data, null, 2));
+      }
     }
     
     return response;
