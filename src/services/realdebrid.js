@@ -53,13 +53,11 @@ const normalizeInfo = (info) => {
 };
 
 export const addTorrentToRealDebrid = async (file) => {
-  const form = new FormData();
-  form.append("file", file.buffer, file.originalname);
-
+  // Real-Debrid expects raw binary data, not FormData
   console.log('[RealDebrid API] PUT /torrents/addTorrent');
-  const response = await client.put("/torrents/addTorrent", form, {
+  const response = await client.put("/torrents/addTorrent", file.buffer, {
     headers: {
-      ...form.getHeaders()
+      'Content-Type': 'application/x-bittorrent'
     }
   });
 
