@@ -3,6 +3,7 @@ import {
   addTorrentToRealDebrid,
   refreshTorrentInfo
 } from "../services/realdebrid.js";
+import pollingService from "../services/pollingService.js";
 
 const isMagnetLink = (value) =>
   typeof value === "string" && value.trim().toLowerCase().startsWith("magnet:");
@@ -32,6 +33,9 @@ export const addMagnet = async (req, res) => {
 
     req.session.torrents.unshift(torrent);
 
+    // Trigger polling service to start/refresh polling
+    pollingService.triggerImmediatePoll();
+
     return res.status(201).json(torrent);
   } catch (error) {
     return res.status(500).json({ error: error.message || "Failed to add magnet." });
@@ -57,6 +61,9 @@ export const addTorrentFile = async (req, res) => {
     };
 
     req.session.torrents.unshift(torrent);
+
+    // Trigger polling service to start/refresh polling
+    pollingService.triggerImmediatePoll();
 
     return res.status(201).json(torrent);
   } catch (error) {
