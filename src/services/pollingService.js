@@ -84,7 +84,8 @@ class PollingService {
         return;
       }
 
-      if (!sessions || sessions.length === 0) {
+      const sessionIds = sessions ? Object.keys(sessions) : [];
+      if (sessionIds.length === 0) {
         // No active sessions, stop polling
         this.stop();
         return;
@@ -93,6 +94,8 @@ class PollingService {
       let hasActiveTorrents = false;
 
       // Process each session
+      console.log(`[PollingService] Polling ${sessionIds.length} session(s)`);
+
       for (const sessionId in sessions) {
         const session = sessions[sessionId];
         
@@ -149,6 +152,7 @@ class PollingService {
       }
 
       try {
+        console.log(`[PollingService] Refreshing torrent ${torrent.id}`);
         // Record the request
         rateLimitMonitor.recordRequest();
         

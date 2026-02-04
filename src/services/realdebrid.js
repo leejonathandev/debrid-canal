@@ -100,11 +100,17 @@ export const addMagnetToRealDebrid = async (magnet) => {
   const info = await getTorrentInfo(torrentId);
   const selectedInfo = await selectAllFilesIfNeeded(torrentId, info);
 
+  let unrestrictedLink = null;
+  if (selectedInfo.status === "downloaded" && selectedInfo.links.length) {
+    unrestrictedLink = await getUnrestrictedLink(selectedInfo.links[0]);
+  }
+
   return {
     id: torrentId,
     name: selectedInfo.name,
     status: selectedInfo.status,
-    progress: selectedInfo.progress
+    progress: selectedInfo.progress,
+    unrestrictedLink
   };
 };
 
