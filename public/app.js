@@ -97,7 +97,8 @@ const handleDrop = async (event) => {
   try {
     if (files && files.length) {
       setStatus("Uploading torrent file...");
-      await uploadTorrent(files[0]);
+      const torrent = await uploadTorrent(files[0]);
+      mergeTorrent(torrent);
       setStatus("Torrent uploaded. Tracking status.");
       return;
     }
@@ -115,7 +116,8 @@ const handleDrop = async (event) => {
 
           try {
             setStatus("Submitting magnet link...");
-            await submitMagnet(text.trim());
+            const torrent = await submitMagnet(text.trim());
+            mergeTorrent(torrent);
             setStatus("Magnet submitted. Tracking status.");
           } catch (error) {
             setStatus(error.message, "error");
@@ -134,7 +136,8 @@ const handleFilePick = async (event) => {
 
   try {
     setStatus("Uploading torrent file...");
-    await uploadTorrent(file);
+    const torrent = await uploadTorrent(file);
+    mergeTorrent(torrent);
     setStatus("Torrent uploaded. Tracking status.");
   } catch (error) {
     setStatus(error.message, "error");
@@ -153,7 +156,8 @@ const handleMagnetSubmit = async () => {
   try {
     magnetSubmit.disabled = true;
     setStatus("Submitting magnet link...");
-    await submitMagnet(magnet);
+    const torrent = await submitMagnet(magnet);
+    mergeTorrent(torrent);
     magnetText.value = "";
     setStatus("Magnet submitted. Tracking status.");
   } catch (error) {
@@ -161,6 +165,25 @@ const handleMagnetSubmit = async () => {
   } finally {
     magnetSubmit.disabled = false;
   }
+};
+
+let currentTorrents = [];
+
+const mergeTorrent = (torrent) => {
+  if (!torrent || !torrent.id) {
+    return;
+  }
+
+  const index = currentTorrents.findIndex((item) => item.id === torrent.id);
+  if (index === -1) {
+    currentTorrents = [torrent, ...currentTorrents];
+  } else {
+    currentTorrents = currentTorrents.map((item, idx) =>
+      idx === index ? { ...item, ...torrent } : item
+    );
+  }
+
+  renderTorrents(currentTorrents);
 };
 
 // Socket.IO event handlers
@@ -173,7 +196,8 @@ socket.on('disconnect', () => {
 });
 
 socket.on('torrents-updated', (data) => {
-  renderTorrents(data.torrents || []);
+  currentTorrents = data.torrents || [];
+  renderTorrents(currentTorrents);
   
   if (data.allComplete) {
     setStatus("All torrents downloaded.");
