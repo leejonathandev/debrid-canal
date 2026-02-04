@@ -174,58 +174,42 @@ class PollingService {
     for (const torrent of session.torrents) {
       const listItem = torrentMap?.get(torrent.id);
 
+      // If torrent not in list, fetch individual info
       if (!listItem) {
+        if (DEBUG) {
+          console.log(`[PollingService DEBUG] Torrent ${torrent.id} not in list, fetching individual info`);
+        }
+        
+        // Try to fetch individual torrent info
+        try {
+          if (rateLimitMonitor.canMakeRequest()) {
+            rateLimitMonitor.recordRequest();
+            const info = await realDebridService.getTorrentInfo(torrent.id);
+            
+            // Convert info to list item format
+            const fetchedItem = {
+              id: info.id,
+              name: info.name,
+              status: info.status,
+              progress: info.progress,
+              links: info.links
+            };
+            
+            // Process this torrent with the fetched info
+            await this.processTorrentUpdate(torrent, fetchedItem, updatedTorrents);
+            continue;
+          }
+        } catch (error) {
+          console.error(`[PollingService] Error fetching individual torrent ${torrent.id}:`, error.message);
+        }
+        
+        // If we couldn't fetch, keep the old data
         updatedTorrents.push(torrent);
         continue;
       }
 
-      // Check if torrent transitioned to waiting_files_selection
-      if (listItem.status === 'waiting_files_selection' && torrent.status !== 'waiting_files_selection') {
-        console.log(`[PollingService] Torrent ${torrent.id} needs file selection, triggering selectFiles`);
-        if (!rateLimitMonitor.canMakeRequest()) {
-          console.log('[PollingService] Rate limit reached, skipping selectFiles');
-        } else {
-          try {
-            rateLimitMonitor.recordRequest();
-            const info = await realDebridService.getTorrentInfo(torrent.id);
-            if (rateLimitMonitor.canMakeRequest()) {
-              rateLimitMonitor.recordRequest();
-              await realDebridService.selectAllFilesIfNeeded(torrent.id, info);
-              console.log(`[PollingService] Successfully selected files for torrent ${torrent.id}`);
-            }
-          } catch (error) {
-            console.error(`[PollingService] Error selecting files for ${torrent.id}:`, error.message);
-          }
-        }
-      }
-
-      let unrestrictedLink = torrent.unrestrictedLink || null;
-      if (!unrestrictedLink && listItem.status === 'downloaded' && listItem.links.length) {
-        if (!rateLimitMonitor.canMakeRequest()) {
-          console.log('[PollingService] Rate limit reached, skipping unrestrict');
-        } else {
-          try {
-            rateLimitMonitor.recordRequest();
-            unrestrictedLink = await realDebridService.getUnrestrictedLink(listItem.links[0]);
-          } catch (error) {
-            console.error(`[PollingService] Error unrestricting link for ${torrent.id}:`, error.message);
-          }
-        }
-      }
-
-      const updated = {
-        ...torrent,
-        name: listItem.name || torrent.name,
-        status: listItem.status,
-        progress: listItem.progress,
-        unrestrictedLink
-      };
-      
-      if (DEBUG && torrent.progress !== listItem.progress) {
-        console.log(`[PollingService DEBUG] Progress updated for ${torrent.id}: ${torrent.progress} -> ${listItem.progress}`);
-      }
-      
-      updatedTorrents.push(updated);
+      // Process torrent with list item data
+      await this.processTorrentUpdate(torrent, listItem, updatedTorrents);
     }
 
     // Update session with new torrent data
@@ -248,6 +232,62 @@ class PollingService {
         allComplete
       });
     });
+  }
+
+  /**
+   * Process a single torrent update with list item data
+   * @param {object} torrent - Current torrent data from session
+   * @param {object} listItem - Fresh data from API
+   * @param {Array} updatedTorrents - Array to push updated torrent to
+   */
+  async processTorrentUpdate(torrent, listItem, updatedTorrents) {
+    // Check if torrent transitioned to waiting_files_selection
+    if (listItem.status === 'waiting_files_selection' && torrent.status !== 'waiting_files_selection') {
+      console.log(`[PollingService] Torrent ${torrent.id} needs file selection, triggering selectFiles`);
+      if (!rateLimitMonitor.canMakeRequest()) {
+        console.log('[PollingService] Rate limit reached, skipping selectFiles');
+      } else {
+        try {
+          rateLimitMonitor.recordRequest();
+          const info = await realDebridService.getTorrentInfo(torrent.id);
+          if (rateLimitMonitor.canMakeRequest()) {
+            rateLimitMonitor.recordRequest();
+            await realDebridService.selectAllFilesIfNeeded(torrent.id, info);
+            console.log(`[PollingService] Successfully selected files for torrent ${torrent.id}`);
+          }
+        } catch (error) {
+          console.error(`[PollingService] Error selecting files for ${torrent.id}:`, error.message);
+        }
+      }
+    }
+
+    let unrestrictedLink = torrent.unrestrictedLink || null;
+    if (!unrestrictedLink && listItem.status === 'downloaded' && listItem.links.length) {
+      if (!rateLimitMonitor.canMakeRequest()) {
+        console.log('[PollingService] Rate limit reached, skipping unrestrict');
+      } else {
+        try {
+          rateLimitMonitor.recordRequest();
+          unrestrictedLink = await realDebridService.getUnrestrictedLink(listItem.links[0]);
+        } catch (error) {
+          console.error(`[PollingService] Error unrestricting link for ${torrent.id}:`, error.message);
+        }
+      }
+    }
+
+    const updated = {
+      ...torrent,
+      name: listItem.name || torrent.name,
+      status: listItem.status,
+      progress: listItem.progress,
+      unrestrictedLink
+    };
+    
+    if (DEBUG && torrent.progress !== listItem.progress) {
+      console.log(`[PollingService DEBUG] Progress updated for ${torrent.id}: ${torrent.progress} -> ${listItem.progress}`);
+    }
+    
+    updatedTorrents.push(updated);
   }
 
   /**

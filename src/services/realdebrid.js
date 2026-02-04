@@ -105,7 +105,18 @@ export const listTorrents = async ({ offset = 0, limit = 100, filter } = {}) => 
 
   const response = await client.get(`/torrents?${params.toString()}`);
 
+  // HTTP 204 (No Content) or empty response means no torrents
+  if (response.status === 204 || !response.data) {
+    if (DEBUG) {
+      console.log('[RealDebrid DEBUG] No torrents found (204 or empty response)');
+    }
+    return [];
+  }
+
   if (!Array.isArray(response.data)) {
+    if (DEBUG) {
+      console.log('[RealDebrid DEBUG] Response data is not an array:', typeof response.data);
+    }
     return [];
   }
 
