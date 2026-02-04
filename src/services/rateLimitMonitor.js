@@ -88,4 +88,4 @@ class RateLimitMonitor {
 }
 
 // Export singleton instance
-module.exports = new RateLimitMonitor();
+export default new RateLimitMonitor();

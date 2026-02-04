@@ -7,8 +7,8 @@
  * - Broadcasts updates to clients via Socket.IO
  */
 
-const rateLimitMonitor = require('./rateLimitMonitor');
-const realDebridService = require('./realdebrid');
+import rateLimitMonitor from './rateLimitMonitor.js';
+import * as realDebridService from './realdebrid.js';
 
 class PollingService {
   constructor() {
@@ -223,4 +223,4 @@ class PollingService {
 }
 
 // Export singleton instance
-module.exports = new PollingService();
+export default new PollingService();
