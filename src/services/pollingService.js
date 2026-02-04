@@ -1,7 +1,7 @@
 /**
  * Polling Service
  * Server-side centralized polling for torrent updates
- * - Polls every 1 second when there are active downloads
+ * - Polls every 5 seconds when there are active downloads
  * - Stops polling when all torrents are downloaded
  * - Checks rate limit before making API calls
  * - Broadcasts updates to clients via Socket.IO
@@ -16,7 +16,7 @@ class PollingService {
     this.sessionStore = null;
     this.pollingInterval = null;
     this.isPolling = false;
-    this.pollIntervalMs = 1000; // 1 second for active downloads
+    this.pollIntervalMs = 5000; // 5 seconds for active downloads
     this.lastSessionLogAt = 0; // For throttling session count logs
   }
 
@@ -61,7 +61,7 @@ class PollingService {
   }
 
   /**
-   * Main polling loop - runs every 1 second
+   * Main polling loop - runs every 5 seconds
    */
   async poll() {
     if (!this.io || !this.sessionStore) {
@@ -173,6 +173,26 @@ class PollingService {
       if (!listItem) {
         updatedTorrents.push(torrent);
         continue;
+      }
+
+      // Check if torrent transitioned to waiting_files_selection
+      if (listItem.status === 'waiting_files_selection' && torrent.status !== 'waiting_files_selection') {
+        console.log(`[PollingService] Torrent ${torrent.id} needs file selection, triggering selectFiles`);
+        if (!rateLimitMonitor.canMakeRequest()) {
+          console.log('[PollingService] Rate limit reached, skipping selectFiles');
+        } else {
+          try {
+            rateLimitMonitor.recordRequest();
+            const info = await realDebridService.getTorrentInfo(torrent.id);
+            if (rateLimitMonitor.canMakeRequest()) {
+              rateLimitMonitor.recordRequest();
+              await realDebridService.selectAllFilesIfNeeded(torrent.id, info);
+              console.log(`[PollingService] Successfully selected files for torrent ${torrent.id}`);
+            }
+          } catch (error) {
+            console.error(`[PollingService] Error selecting files for ${torrent.id}:`, error.message);
+          }
+        }
       }
 
       let unrestrictedLink = torrent.unrestrictedLink || null;

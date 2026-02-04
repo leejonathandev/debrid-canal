@@ -159,6 +159,7 @@ export const getTorrentInfo = async (torrentId) => {
 };
 
 export const selectAllFilesIfNeeded = async (torrentId, info) => {
+  // Only proceed with file selection if status is waiting_files_selection
   if (info.status !== "waiting_files_selection") {
     return info;
   }
