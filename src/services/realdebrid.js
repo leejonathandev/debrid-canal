@@ -20,12 +20,24 @@ const client = axios.create({
   timeout: 30000
 });
 
-// Add response interceptor to handle rate limiting
+// Add response interceptor to handle rate limiting and log status codes
 client.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const method = response.config?.method?.toUpperCase() || 'REQUEST';
+    const url = response.config?.url || '';
+    console.log(`[RealDebrid API] ${method} ${url} -> ${response.status}`);
+    return response;
+  },
   (error) => {
+    const status = error.response?.status;
+    const method = error.config?.method?.toUpperCase() || 'REQUEST';
+    const url = error.config?.url || '';
+    if (status) {
+      console.warn(`[RealDebrid API] ${method} ${url} -> ${status}`);
+    }
+
     // Check for HTTP 429 rate limit error
-    if (error.response && error.response.status === 429) {
+    if (status === 429) {
       console.error('[RealDebrid] HTTP 429 - Rate limit exceeded');
       rateLimitMonitor.markRateLimitHit();
       
@@ -71,7 +83,6 @@ export const listTorrents = async ({ offset = 0, limit = 100, filter } = {}) => 
     params.set("filter", filter);
   }
 
-  console.log('[RealDebrid API] GET /torrents');
   const response = await client.get(`/torrents?${params.toString()}`);
 
   if (!Array.isArray(response.data)) {
@@ -83,7 +94,6 @@ export const listTorrents = async ({ offset = 0, limit = 100, filter } = {}) => 
 
 export const addTorrentToRealDebrid = async (file) => {
   // Real-Debrid expects raw binary data, not FormData
-  console.log('[RealDebrid API] PUT /torrents/addTorrent');
   const response = await client.put("/torrents/addTorrent", file.buffer, {
     headers: {
       'Content-Type': 'application/x-bittorrent'
@@ -115,7 +125,6 @@ export const addTorrentToRealDebrid = async (file) => {
 export const addMagnetToRealDebrid = async (magnet) => {
   const params = new URLSearchParams({ magnet });
 
-  console.log('[RealDebrid API] POST /torrents/addMagnet');
   const response = await client.post("/torrents/addMagnet", params, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -145,7 +154,6 @@ export const addMagnetToRealDebrid = async (magnet) => {
 };
 
 export const getTorrentInfo = async (torrentId) => {
-  console.log(`[RealDebrid API] GET /torrents/info/${torrentId}`);
   const response = await client.get(`/torrents/info/${torrentId}`);
   return normalizeInfo(response.data);
 };
@@ -162,7 +170,6 @@ export const selectAllFilesIfNeeded = async (torrentId, info) => {
   const fileIds = info.files.map((file) => file.id).join(",");
   const params = new URLSearchParams({ files: fileIds });
 
-  console.log(`[RealDebrid API] POST /torrents/selectFiles/${torrentId}`);
   await client.post(`/torrents/selectFiles/${torrentId}`, params, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -175,7 +182,6 @@ export const selectAllFilesIfNeeded = async (torrentId, info) => {
 
 export const getUnrestrictedLink = async (link) => {
   const params = new URLSearchParams({ link });
-  console.log('[RealDebrid API] POST /unrestrict/link');
   const response = await client.post("/unrestrict/link", params, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"

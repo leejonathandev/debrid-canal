@@ -17,6 +17,7 @@ class PollingService {
     this.pollingInterval = null;
     this.isPolling = false;
     this.pollIntervalMs = 1000; // 1 second for active downloads
+    this.lastSessionLogAt = 0; // For throttling session count logs
   }
 
   /**
@@ -111,8 +112,12 @@ class PollingService {
 
       const torrentMap = new Map(accountTorrents.map((item) => [item.id, item]));
 
-      // Process each session
-      console.log(`[PollingService] Polling ${sessionIds.length} session(s)`);
+      // Process each session - log once per minute
+      const now = Date.now();
+      if (now - this.lastSessionLogAt >= 60 * 1000) {
+        console.log(`[PollingService] Polling ${sessionIds.length} session(s)`);
+        this.lastSessionLogAt = now;
+      }
 
       for (const sessionId in sessions) {
         const session = sessions[sessionId];
