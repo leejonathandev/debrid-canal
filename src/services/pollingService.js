@@ -173,36 +173,7 @@ class PollingService {
     for (const torrent of session.torrents) {
       const listItem = torrentMap?.get(torrent.id);
 
-      // If torrent not in list, fetch individual info
       if (!listItem) {
-        if (DEBUG) {
-          console.log(`[PollingService DEBUG] Torrent ${torrent.id} not in list, fetching individual info`);
-        }
-        
-        // Try to fetch individual torrent info
-        try {
-          if (rateLimitMonitor.canMakeRequest()) {
-            rateLimitMonitor.recordRequest();
-            const info = await realDebridService.getTorrentInfo(torrent.id);
-            
-            // Convert info to list item format
-            const fetchedItem = {
-              id: info.id,
-              name: info.name,
-              status: info.status,
-              progress: info.progress,
-              links: info.links
-            };
-            
-            // Process this torrent with the fetched info
-            await this.processTorrentUpdate(torrent, fetchedItem, updatedTorrents);
-            continue;
-          }
-        } catch (error) {
-          console.error(`[PollingService] Error fetching individual torrent ${torrent.id}:`, error.message);
-        }
-        
-        // If we couldn't fetch, keep the old data
         updatedTorrents.push(torrent);
         continue;
       }
