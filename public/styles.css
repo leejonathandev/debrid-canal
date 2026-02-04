@@ -33,6 +33,43 @@ body {
   color: #4b5563;
 }
 
+.rate-limit-banner {
+  background: #fef3c7;
+  border: 1px solid #fbbf24;
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rate-limit-banner__icon {
+  font-size: 1.4rem;
+}
+
+.rate-limit-banner__message {
+  flex: 1;
+  color: #92400e;
+  font-size: 0.95rem;
+}
+
+.rate-limit-banner__message strong {
+  font-weight: 700;
+  color: #b45309;
+}
+
 .uploader {
   display: grid;
   gap: 16px;

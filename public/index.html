@@ -13,6 +13,14 @@
         <p>Drop a torrent file or magnet link to get an unrestricted download.</p>
       </header>
 
+      <!-- Rate Limit Banner -->
+      <div id="rate-limit-banner" class="rate-limit-banner" style="display: none;">
+        <span class="rate-limit-banner__icon">⚠️</span>
+        <span class="rate-limit-banner__message">
+          Rate limit reached. Resuming in <strong id="rate-limit-countdown">60</strong> seconds...
+        </span>
+      </div>
+
       <section class="uploader">
         <div id="drop-zone" class="drop-zone" tabindex="0">
           <input id="file-input" type="file" accept=".torrent" hidden />
@@ -44,6 +52,7 @@
       </section>
     </main>
 
+    <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>
