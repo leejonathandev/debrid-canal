@@ -79,7 +79,7 @@ class PollingService {
     }
 
     // Get all active sessions
-    this.sessionStore.all((err, sessions) => {
+    this.sessionStore.all(async (err, sessions) => {
       if (err) {
         console.error('[PollingService] Error fetching sessions:', err);
         return;
@@ -93,6 +93,23 @@ class PollingService {
       }
 
       let hasActiveTorrents = false;
+
+      let accountTorrents = [];
+      try {
+        if (rateLimitMonitor.canMakeRequest()) {
+          rateLimitMonitor.recordRequest();
+          accountTorrents = await realDebridService.listTorrents({
+            offset: 0,
+            limit: 100
+          });
+        } else {
+          console.log('[PollingService] Rate limit reached, skipping listTorrents');
+        }
+      } catch (error) {
+        console.error('[PollingService] Error listing torrents:', error.message);
+      }
+
+      const torrentMap = new Map(accountTorrents.map((item) => [item.id, item]));
 
       // Process each session
       console.log(`[PollingService] Polling ${sessionIds.length} session(s)`);
@@ -112,7 +129,7 @@ class PollingService {
         if (activeTorrents.length > 0) {
           hasActiveTorrents = true;
           // Refresh torrents for this session
-          this.refreshSessionTorrents(sessionId, session);
+          this.refreshSessionTorrents(sessionId, session, torrentMap);
         } else {
           // All torrents downloaded, send update to client
           const socketIds = this.getSocketIdsForSession(sessionId);
@@ -138,7 +155,7 @@ class PollingService {
    * @param {string} sessionId - Session ID
    * @param {object} session - Session object
    */
-  async refreshSessionTorrents(sessionId, session) {
+  async refreshSessionTorrents(sessionId, session, torrentMap) {
     if (!session.torrents || session.torrents.length === 0) {
       return;
     }
@@ -146,25 +163,34 @@ class PollingService {
     const updatedTorrents = [];
 
     for (const torrent of session.torrents) {
-      // Check rate limit before each API call
-      if (!rateLimitMonitor.canMakeRequest()) {
-        console.log('[PollingService] Rate limit reached, skipping remaining torrents');
-        break;
+      const listItem = torrentMap?.get(torrent.id);
+
+      if (!listItem) {
+        updatedTorrents.push(torrent);
+        continue;
       }
 
-      try {
-        console.log(`[PollingService] Refreshing torrent ${torrent.id}`);
-        // Record the request
-        rateLimitMonitor.recordRequest();
-        
-        // Refresh torrent info
-        const updatedTorrent = await realDebridService.refreshTorrentInfo(torrent);
-        updatedTorrents.push(updatedTorrent);
-      } catch (error) {
-        console.error(`[PollingService] Error refreshing torrent ${torrent.id}:`, error.message);
-        // Keep the existing torrent data on error
-        updatedTorrents.push(torrent);
+      let unrestrictedLink = torrent.unrestrictedLink || null;
+      if (!unrestrictedLink && listItem.status === 'downloaded' && listItem.links.length) {
+        if (!rateLimitMonitor.canMakeRequest()) {
+          console.log('[PollingService] Rate limit reached, skipping unrestrict');
+        } else {
+          try {
+            rateLimitMonitor.recordRequest();
+            unrestrictedLink = await realDebridService.getUnrestrictedLink(listItem.links[0]);
+          } catch (error) {
+            console.error(`[PollingService] Error unrestricting link for ${torrent.id}:`, error.message);
+          }
+        }
       }
+
+      updatedTorrents.push({
+        ...torrent,
+        name: listItem.name || torrent.name,
+        status: listItem.status,
+        progress: listItem.progress,
+        unrestrictedLink
+      });
     }
 
     // Update session with new torrent data

@@ -51,6 +51,36 @@ const normalizeInfo = (info) => {
   };
 };
 
+const normalizeListItem = (item) => {
+  return {
+    id: item.id,
+    name: item.filename,
+    status: item.status,
+    progress: Number(item.progress || 0),
+    links: Array.isArray(item.links) ? item.links : []
+  };
+};
+
+export const listTorrents = async ({ offset = 0, limit = 100, filter } = {}) => {
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit)
+  });
+
+  if (filter) {
+    params.set("filter", filter);
+  }
+
+  console.log('[RealDebrid API] GET /torrents');
+  const response = await client.get(`/torrents?${params.toString()}`);
+
+  if (!Array.isArray(response.data)) {
+    return [];
+  }
+
+  return response.data.map(normalizeListItem);
+};
+
 export const addTorrentToRealDebrid = async (file) => {
   // Real-Debrid expects raw binary data, not FormData
   console.log('[RealDebrid API] PUT /torrents/addTorrent');
