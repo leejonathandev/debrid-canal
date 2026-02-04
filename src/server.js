@@ -20,7 +20,8 @@ const __dirname = path.dirname(__filename);
 
 app.set("trust proxy", 1);
 
-app.use(morgan("dev"));
+// Custom Morgan format with IP address for client requests
+app.use(morgan(':remote-addr - :method :url :status :response-time ms - :res[content-length]'));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 

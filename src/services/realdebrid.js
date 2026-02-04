@@ -56,7 +56,8 @@ export const addTorrentToRealDebrid = async (file) => {
   const form = new FormData();
   form.append("file", file.buffer, file.originalname);
 
-  const response = await client.post("/torrents/addTorrent", form, {
+  console.log('[RealDebrid API] PUT /torrents/addTorrent');
+  const response = await client.put("/torrents/addTorrent", form, {
     headers: {
       ...form.getHeaders()
     }
@@ -81,6 +82,7 @@ export const addTorrentToRealDebrid = async (file) => {
 export const addMagnetToRealDebrid = async (magnet) => {
   const params = new URLSearchParams({ magnet });
 
+  console.log('[RealDebrid API] POST /torrents/addMagnet');
   const response = await client.post("/torrents/addMagnet", params, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -104,6 +106,7 @@ export const addMagnetToRealDebrid = async (magnet) => {
 };
 
 export const getTorrentInfo = async (torrentId) => {
+  console.log(`[RealDebrid API] GET /torrents/info/${torrentId}`);
   const response = await client.get(`/torrents/info/${torrentId}`);
   return normalizeInfo(response.data);
 };
@@ -120,6 +123,7 @@ export const selectAllFilesIfNeeded = async (torrentId, info) => {
   const fileIds = info.files.map((file) => file.id).join(",");
   const params = new URLSearchParams({ files: fileIds });
 
+  console.log(`[RealDebrid API] POST /torrents/selectFiles/${torrentId}`);
   await client.post(`/torrents/selectFiles/${torrentId}`, params, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -132,6 +136,7 @@ export const selectAllFilesIfNeeded = async (torrentId, info) => {
 
 export const getUnrestrictedLink = async (link) => {
   const params = new URLSearchParams({ link });
+  console.log('[RealDebrid API] POST /unrestrict/link');
   const response = await client.post("/unrestrict/link", params, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"

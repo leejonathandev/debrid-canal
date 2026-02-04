@@ -38,6 +38,13 @@ export const addMagnet = async (req, res) => {
 
     return res.status(201).json(torrent);
   } catch (error) {
+    console.error('[Controller] Error adding magnet:', {
+      message: error.message,
+      status: error.status,
+      isRateLimit: error.isRateLimit,
+      response: error.response?.data,
+      stack: error.stack
+    });
     return res.status(500).json({ error: error.message || "Failed to add magnet." });
   }
 };
@@ -67,6 +74,13 @@ export const addTorrentFile = async (req, res) => {
 
     return res.status(201).json(torrent);
   } catch (error) {
+    console.error('[Controller] Error uploading torrent file:', {
+      message: error.message,
+      status: error.status,
+      isRateLimit: error.isRateLimit,
+      response: error.response?.data,
+      stack: error.stack
+    });
     return res
       .status(500)
       .json({ error: error.message || "Failed to upload torrent." });
@@ -92,6 +106,13 @@ export const listTorrents = async (req, res) => {
     req.session.torrents = refreshed;
     return res.json(refreshed);
   } catch (error) {
+    console.error('[Controller] Error refreshing torrents:', {
+      message: error.message,
+      status: error.status,
+      isRateLimit: error.isRateLimit,
+      response: error.response?.data,
+      stack: error.stack
+    });
     return res
       .status(500)
       .json({ error: error.message || "Failed to refresh torrents." });
