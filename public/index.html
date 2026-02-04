@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Debrid Canal</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="header">
+        <h1>debrid-canal</h1>
+        <p>Drop a torrent file or magnet link to get an unrestricted download.</p>
+      </header>
+
+      <section class="uploader">
+        <div id="drop-zone" class="drop-zone" tabindex="0">
+          <input id="file-input" type="file" accept=".torrent" hidden />
+          <div class="drop-zone__content">
+            <span class="drop-zone__icon">⬆️</span>
+            <p><strong>Click to choose</strong> or drag a .torrent file here</p>
+            <p class="muted">You can also drag a magnet link into this box.</p>
+          </div>
+        </div>
+
+        <div class="magnet-input">
+          <label for="magnet-text">Paste magnet link</label>
+          <div class="magnet-input__row">
+            <input
+              id="magnet-text"
+              type="text"
+              placeholder="magnet:?xt=urn:btih:..."
+            />
+            <button id="magnet-submit" type="button">Submit</button>
+          </div>
+        </div>
+
+        <div id="status" class="status"></div>
+      </section>
+
+      <section class="results">
+        <h2>Your session torrents</h2>
+        <div id="torrent-list" class="torrent-list"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

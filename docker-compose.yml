@@ -1,0 +1,9 @@
+services:
+  debrid-canal:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - REALDEBRID_API_KEY=${REALDEBRID_API_KEY}
+      - PORT=3000
+      - SESSION_SECRET=${SESSION_SECRET:-change_me}
