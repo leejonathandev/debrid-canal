@@ -25,6 +25,12 @@ app.use(morgan(':remote-addr - :method :url :status :response-time ms - :res[con
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
+// Attach Socket.IO instance to requests
+app.use((req, _res, next) => {
+  req.io = io;
+  next();
+});
+
 // Session configuration
 const sessionMiddleware = session({
   name: "debrid_canal",

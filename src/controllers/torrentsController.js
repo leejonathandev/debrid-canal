@@ -11,6 +11,26 @@ const isMagnetLink = (value) =>
 const findTorrent = (req, id) =>
   req.session.torrents.find((torrent) => torrent.id === id);
 
+const emitSessionUpdate = (req) => {
+  if (!req.io || !req.session) {
+    return;
+  }
+
+  const torrents = req.session.torrents || [];
+  const allComplete = torrents.every(
+    (torrent) => torrent.status === "downloaded" && torrent.progress === 100
+  );
+
+  req.io.sockets.sockets.forEach((socket) => {
+    if (socket.sessionId === req.session.id) {
+      req.io.to(socket.id).emit("torrents-updated", {
+        torrents,
+        allComplete
+      });
+    }
+  });
+};
+
 export const addMagnet = async (req, res) => {
   const { magnet } = req.body;
 
@@ -32,6 +52,13 @@ export const addMagnet = async (req, res) => {
     };
 
     req.session.torrents.unshift(torrent);
+
+    req.session.save((err) => {
+      if (err) {
+        console.error("[Controller] Error saving session:", err);
+      }
+      emitSessionUpdate(req);
+    });
 
     // Trigger polling service to start/refresh polling
     pollingService.triggerImmediatePoll();
@@ -68,6 +95,13 @@ export const addTorrentFile = async (req, res) => {
     };
 
     req.session.torrents.unshift(torrent);
+
+    req.session.save((err) => {
+      if (err) {
+        console.error("[Controller] Error saving session:", err);
+      }
+      emitSessionUpdate(req);
+    });
 
     // Trigger polling service to start/refresh polling
     pollingService.triggerImmediatePoll();
