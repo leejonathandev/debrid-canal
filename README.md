@@ -49,6 +49,7 @@ npm install
 ```env
 REALDEBRID_API_KEY=your_api_key_here
 PORT=3000
+LOG_LEVEL=debug  # Optional: Set to 'debug' for verbose API response logging
 ```
 
 4. Start the server:

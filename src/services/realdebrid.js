@@ -6,6 +6,7 @@ dotenv.config();
 
 const API_BASE = "https://api.real-debrid.com/rest/1.0";
 const API_KEY = process.env.REALDEBRID_API_KEY;
+const DEBUG = process.env.LOG_LEVEL === 'debug';
 
 if (!API_KEY) {
   // eslint-disable-next-line no-console
@@ -26,6 +27,11 @@ client.interceptors.response.use(
     const method = response.config?.method?.toUpperCase() || 'REQUEST';
     const url = response.config?.url || '';
     console.log(`[RealDebrid API] ${method} ${url} -> ${response.status}`);
+    
+    if (DEBUG) {
+      console.log(`[RealDebrid API DEBUG] Full response:`, JSON.stringify(response.data, null, 2));
+    }
+    
     return response;
   },
   (error) => {
@@ -64,13 +70,19 @@ const normalizeInfo = (info) => {
 };
 
 const normalizeListItem = (item) => {
-  return {
+  const normalized = {
     id: item.id,
     name: item.filename,
     status: item.status,
     progress: Number(item.progress || 0),
     links: Array.isArray(item.links) ? item.links : []
   };
+  
+  if (DEBUG) {
+    console.log(`[RealDebrid DEBUG] Normalized torrent ${item.id}: status=${normalized.status}, progress=${normalized.progress}`);
+  }
+  
+  return normalized;
 };
 
 export const listTorrents = async ({ offset = 0, limit = 100, filter } = {}) => {

@@ -9,6 +9,10 @@
 
 import rateLimitMonitor from './rateLimitMonitor.js';
 import * as realDebridService from './realdebrid.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
+const DEBUG = process.env.LOG_LEVEL === 'debug';
 
 class PollingService {
   constructor() {
@@ -209,13 +213,19 @@ class PollingService {
         }
       }
 
-      updatedTorrents.push({
+      const updated = {
         ...torrent,
         name: listItem.name || torrent.name,
         status: listItem.status,
         progress: listItem.progress,
         unrestrictedLink
-      });
+      };
+      
+      if (DEBUG && torrent.progress !== listItem.progress) {
+        console.log(`[PollingService DEBUG] Progress updated for ${torrent.id}: ${torrent.progress} -> ${listItem.progress}`);
+      }
+      
+      updatedTorrents.push(updated);
     }
 
     // Update session with new torrent data
