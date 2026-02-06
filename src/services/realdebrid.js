@@ -66,6 +66,8 @@ client.interceptors.response.use(
   }
 );
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const normalizeInfo = (info) => {
   return {
     id: info.id,
@@ -87,21 +89,20 @@ const normalizeListItem = (item) => {
   };
   
   if (DEBUG) {
-    console.log(`[RealDebrid DEBUG] Normalized torrent ${item.id}: status=${normalized.status}, progress=${normalized.progress}`);
+    console.log(
+      `[RealDebrid DEBUG] Normalized torrent ${item.id} (hash=${item.hash}): status=${normalized.status}, progress=${normalized.progress}`
+    );
   }
   
   return normalized;
 };
 
-export const listTorrents = async ({ filter } = {}) => {
-  const params = new URLSearchParams();
+export const listTorrents = async ({ limit = 10 } = {}) => {
+  const params = new URLSearchParams({
+    limit: String(limit)
+  });
 
-  if (filter) {
-    params.set("filter", filter);
-  }
-
-  const queryString = params.toString();
-  const response = await client.get(queryString ? `/torrents?${queryString}` : "/torrents");
+  const response = await client.get(`/torrents?${params.toString()}`);
 
   // HTTP 204 (No Content) or empty response means no torrents
   if (response.status === 204 || !response.data) {
@@ -134,20 +135,19 @@ export const addTorrentToRealDebrid = async (file) => {
     throw new Error("RealDebrid did not return a torrent id.");
   }
 
-  const info = await getTorrentInfo(torrentId);
-  const selectedInfo = await selectAllFilesIfNeeded(torrentId, info);
+  await sleep(1000);
+  await selectAllFiles(torrentId);
+  await sleep(1000);
 
-  let unrestrictedLink = null;
-  if (selectedInfo.status === "downloaded" && selectedInfo.links.length) {
-    unrestrictedLink = await getUnrestrictedLink(selectedInfo.links[0]);
-  }
+  const recent = await listTorrents({ limit: 10 });
+  const listItem = recent.find((item) => item.id === torrentId);
 
   return {
     id: torrentId,
-    name: selectedInfo.name,
-    status: selectedInfo.status,
-    progress: selectedInfo.progress,
-    unrestrictedLink
+    name: listItem?.name || file.originalname,
+    status: listItem?.status || "queued",
+    progress: listItem?.progress ?? 0,
+    unrestrictedLink: null
   };
 };
 
@@ -165,20 +165,19 @@ export const addMagnetToRealDebrid = async (magnet) => {
     throw new Error("RealDebrid did not return a torrent id.");
   }
 
-  const info = await getTorrentInfo(torrentId);
-  const selectedInfo = await selectAllFilesIfNeeded(torrentId, info);
+  await sleep(1000);
+  await selectAllFiles(torrentId);
+  await sleep(1000);
 
-  let unrestrictedLink = null;
-  if (selectedInfo.status === "downloaded" && selectedInfo.links.length) {
-    unrestrictedLink = await getUnrestrictedLink(selectedInfo.links[0]);
-  }
+  const recent = await listTorrents({ limit: 10 });
+  const listItem = recent.find((item) => item.id === torrentId);
 
   return {
     id: torrentId,
-    name: selectedInfo.name,
-    status: selectedInfo.status,
-    progress: selectedInfo.progress,
-    unrestrictedLink
+    name: listItem?.name || "Magnet",
+    status: listItem?.status || "queued",
+    progress: listItem?.progress ?? 0,
+    unrestrictedLink: null
   };
 };
 
@@ -187,27 +186,14 @@ export const getTorrentInfo = async (torrentId) => {
   return normalizeInfo(response.data);
 };
 
-export const selectAllFilesIfNeeded = async (torrentId, info) => {
-  // Only proceed with file selection if status is waiting_files_selection
-  if (info.status !== "waiting_files_selection") {
-    return info;
-  }
-
-  if (!info.files.length) {
-    return info;
-  }
-
-  const fileIds = info.files.map((file) => file.id).join(",");
-  const params = new URLSearchParams({ files: fileIds });
+export const selectAllFiles = async (torrentId) => {
+  const params = new URLSearchParams({ files: "all" });
 
   await client.post(`/torrents/selectFiles/${torrentId}`, params, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
     }
   });
-
-  const refreshed = await getTorrentInfo(torrentId);
-  return refreshed;
 };
 
 export const getUnrestrictedLink = async (link) => {
@@ -223,21 +209,20 @@ export const getUnrestrictedLink = async (link) => {
 
 export const refreshTorrentInfo = async (torrent) => {
   const info = await getTorrentInfo(torrent.id);
-  const selectedInfo = await selectAllFilesIfNeeded(torrent.id, info);
 
   let unrestrictedLink = torrent.unrestrictedLink || null;
 
-  if (!unrestrictedLink && selectedInfo.links.length) {
-    if (selectedInfo.status === "downloaded") {
-      unrestrictedLink = await getUnrestrictedLink(selectedInfo.links[0]);
+  if (!unrestrictedLink && info.links.length) {
+    if (info.status === "downloaded") {
+      unrestrictedLink = await getUnrestrictedLink(info.links[0]);
     }
   }
 
   return {
     ...torrent,
-    name: selectedInfo.name || torrent.name,
-    status: selectedInfo.status,
-    progress: selectedInfo.progress,
+    name: info.name || torrent.name,
+    status: info.status,
+    progress: info.progress,
     unrestrictedLink
   };
 };

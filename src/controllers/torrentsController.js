@@ -21,13 +21,11 @@ const emitSessionUpdate = (req) => {
     (torrent) => torrent.status === "downloaded" && torrent.progress === 100
   );
 
-  req.io.sockets.sockets.forEach((socket) => {
-    if (socket.sessionId === req.session.id) {
-      req.io.to(socket.id).emit("torrents-updated", {
-        torrents,
-        allComplete
-      });
-    }
+  const sessionId = req.sessionID;
+
+  req.io.to(sessionId).emit("torrents-updated", {
+    torrents,
+    allComplete
   });
 };
 

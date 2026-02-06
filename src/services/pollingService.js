@@ -99,12 +99,14 @@ class PollingService {
 
       let hasActiveTorrents = false;
 
+      const listLimit = Math.max(10, sessionIds.length * 10);
+
       let accountTorrents = [];
       try {
         if (rateLimitMonitor.canMakeRequest()) {
           rateLimitMonitor.recordRequest();
           accountTorrents = await realDebridService.listTorrents({
-            filter: "active"
+            limit: listLimit
           });
         } else {
           console.log('[PollingService] Rate limit reached, skipping listTorrents');
@@ -129,24 +131,10 @@ class PollingService {
           continue;
         }
 
-        // Check if this session has any active downloads
-        const activeTorrents = session.torrents.filter(t => 
-          t.status !== 'downloaded' || t.progress < 100
-        );
-
-        if (activeTorrents.length > 0) {
+        // Always refresh torrents for this session to avoid stale data
+        const updatedTorrents = await this.refreshSessionTorrents(sessionId, session, torrentMap);
+        if (updatedTorrents && updatedTorrents.some(t => t.status === 'downloading')) {
           hasActiveTorrents = true;
-          // Refresh torrents for this session
-          this.refreshSessionTorrents(sessionId, session, torrentMap);
-        } else {
-          // All torrents downloaded, send update to client
-          const socketIds = this.getSocketIdsForSession(sessionId);
-          socketIds.forEach(socketId => {
-            this.io.to(socketId).emit('torrents-updated', {
-              torrents: session.torrents,
-              allComplete: true
-            });
-          });
         }
       }
 
@@ -165,7 +153,7 @@ class PollingService {
    */
   async refreshSessionTorrents(sessionId, session, torrentMap) {
     if (!session.torrents || session.torrents.length === 0) {
-      return;
+      return [];
     }
 
     const updatedTorrents = [];
@@ -193,15 +181,20 @@ class PollingService {
     });
 
     // Broadcast update to all sockets associated with this session
-    const socketIds = this.getSocketIdsForSession(sessionId);
     const allComplete = updatedTorrents.every(t => t.status === 'downloaded' && t.progress === 100);
-    
-    socketIds.forEach(socketId => {
-      this.io.to(socketId).emit('torrents-updated', {
-        torrents: updatedTorrents,
-        allComplete
-      });
+    console.log(`[PollingService] Emitting 'torrents-updated' to session: ${sessionId}`);
+    console.log(`[PollingService] Number of torrents: ${updatedTorrents.length}`);
+    console.log('[PollingService] Torrent summary:', updatedTorrents.map(t => ({
+      id: t.id,
+      progress: t.progress,
+      status: t.status
+    })));
+    this.io.to(sessionId).emit('torrents-updated', {
+      torrents: updatedTorrents,
+      allComplete
     });
+
+    return updatedTorrents;
   }
 
   /**
@@ -219,10 +212,9 @@ class PollingService {
       } else {
         try {
           rateLimitMonitor.recordRequest();
-          const info = await realDebridService.getTorrentInfo(torrent.id);
           if (rateLimitMonitor.canMakeRequest()) {
             rateLimitMonitor.recordRequest();
-            await realDebridService.selectAllFilesIfNeeded(torrent.id, info);
+            await realDebridService.selectAllFiles(torrent.id);
             console.log(`[PollingService] Successfully selected files for torrent ${torrent.id}`);
           }
         } catch (error) {
@@ -258,28 +250,6 @@ class PollingService {
     }
     
     updatedTorrents.push(updated);
-  }
-
-  /**
-   * Get all socket IDs associated with a session ID
-   * @param {string} sessionId - Express session ID
-   * @returns {Array<string>} Array of socket IDs
-   */
-  getSocketIdsForSession(sessionId) {
-    const socketIds = [];
-    
-    if (!this.io || !this.io.sockets || !this.io.sockets.sockets) {
-      return socketIds;
-    }
-
-    // Iterate through all connected sockets
-    this.io.sockets.sockets.forEach((socket) => {
-      if (socket.sessionId === sessionId) {
-        socketIds.push(socket.id);
-      }
-    });
-
-    return socketIds;
   }
 
   /**
