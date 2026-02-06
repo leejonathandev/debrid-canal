@@ -78,10 +78,13 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   const session = socket.request.session;
+  const sessionId = socket.request.sessionID;
   
-  if (session && session.id) {
-    socket.sessionId = session.id;
-    console.log(`[Socket.IO] Client connected: ${socket.id} (session: ${session.id})`);
+  if (session && sessionId) {
+    socket.sessionId = sessionId;
+    socket.join(sessionId);
+    console.log(`[Socket.IO] Client connected: ${socket.id} (session: ${sessionId})`);
+    console.log(`[Socket.IO] Socket joined room: ${sessionId}`);
     
     // Send initial torrent data
     socket.emit('torrents-updated', {

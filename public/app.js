@@ -196,8 +196,22 @@ socket.on('disconnect', () => {
 });
 
 socket.on('torrents-updated', (data) => {
+  console.log('[Socket.IO] Received torrents-updated event');
+  console.log('[Socket.IO] Data received:', {
+    torrentsCount: data.torrents?.length,
+    allComplete: data.allComplete,
+    progressValues: data.torrents?.map(t => ({ id: t.id, progress: t.progress, status: t.status }))
+  });
+
   currentTorrents = data.torrents || [];
   renderTorrents(currentTorrents);
+
+  console.log('[Socket.IO] currentTorrents after update:', currentTorrents.map(t => ({
+    id: t.id,
+    name: t.name,
+    progress: t.progress,
+    status: t.status
+  })));
   
   if (data.allComplete) {
     setStatus("All torrents downloaded.");
