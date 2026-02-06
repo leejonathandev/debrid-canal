@@ -49,7 +49,7 @@ npm install
 ```env
 REALDEBRID_API_KEY=your_api_key_here
 PORT=3000
-LOG_LEVEL=debug  # Optional: Set to 'debug' for verbose API response logging
+LOG_LEVEL=debug  # Optional: trace, debug, info, warn, error, fatal
 ```
 
 4. Start the server:
@@ -87,6 +87,7 @@ docker-compose up -d
 | `REALDEBRID_API_KEY` | Your RealDebrid API key | Yes | - |
 | `PORT` | Port for the web server | No | 3000 |
 | `NODE_ENV` | Environment mode | No | production |
+| `LOG_LEVEL` | Logging level (trace, debug, info, warn, error, fatal) | No | info |
 
 ## Usage
 

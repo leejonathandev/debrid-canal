@@ -10,9 +10,10 @@
 import rateLimitMonitor from './rateLimitMonitor.js';
 import * as realDebridService from './realdebrid.js';
 import dotenv from 'dotenv';
+import logger from '../utils/logger.js';
 
 dotenv.config();
-const DEBUG = process.env.LOG_LEVEL === 'debug';
+const isDebug = logger.isDebug();
 
 class PollingService {
   constructor() {
@@ -32,7 +33,7 @@ class PollingService {
   initialize(io, sessionStore) {
     this.io = io;
     this.sessionStore = sessionStore;
-    console.log('[PollingService] Initialized');
+    logger.info('[PollingService] Initialized');
   }
 
   /**
@@ -43,7 +44,7 @@ class PollingService {
       return;
     }
 
-    console.log('[PollingService] Starting polling...');
+    logger.info('[PollingService] Starting polling...');
     this.isPolling = true;
     this.pollingInterval = setInterval(() => this.poll(), this.pollIntervalMs);
   }
@@ -56,7 +57,7 @@ class PollingService {
       return;
     }
 
-    console.log('[PollingService] Stopping polling...');
+    logger.info('[PollingService] Stopping polling...');
     this.isPolling = false;
     if (this.pollingInterval) {
       clearInterval(this.pollingInterval);
@@ -69,7 +70,7 @@ class PollingService {
    */
   async poll() {
     if (!this.io || !this.sessionStore) {
-      console.warn('[PollingService] Poll skipped: missing io or sessionStore');
+      logger.warn('[PollingService] Poll skipped: missing io or sessionStore');
       return;
     }
 
@@ -86,7 +87,7 @@ class PollingService {
     // Get all active sessions
     this.sessionStore.all(async (err, sessions) => {
       if (err) {
-        console.error('[PollingService] Error fetching sessions:', err);
+        logger.error('[PollingService] Error fetching sessions:', err);
         return;
       }
 
@@ -109,10 +110,10 @@ class PollingService {
             limit: listLimit
           });
         } else {
-          console.log('[PollingService] Rate limit reached, skipping listTorrents');
+          logger.info('[PollingService] Rate limit reached, skipping listTorrents');
         }
       } catch (error) {
-        console.error('[PollingService] Error listing torrents:', error.message);
+        logger.error('[PollingService] Error listing torrents:', error.message);
       }
 
       const torrentMap = new Map(accountTorrents.map((item) => [item.id, item]));
@@ -120,7 +121,7 @@ class PollingService {
       // Process each session - log once per minute
       const now = Date.now();
       if (now - this.lastSessionLogAt >= 60 * 1000) {
-        console.log(`[PollingService] Polling ${sessionIds.length} session(s)`);
+        logger.info(`[PollingService] Polling ${sessionIds.length} session(s)`);
         this.lastSessionLogAt = now;
       }
 
@@ -140,7 +141,7 @@ class PollingService {
 
       // If no active torrents across all sessions, stop polling
       if (!hasActiveTorrents) {
-        console.log('[PollingService] No active torrents, stopping polling');
+        logger.info('[PollingService] No active torrents, stopping polling');
         this.stop();
       }
     });
@@ -176,15 +177,15 @@ class PollingService {
     // Save session
     this.sessionStore.set(sessionId, session, (err) => {
       if (err) {
-        console.error('[PollingService] Error saving session:', err);
+        logger.error('[PollingService] Error saving session:', err);
       }
     });
 
     // Broadcast update to all sockets associated with this session
     const allComplete = updatedTorrents.every(t => t.status === 'downloaded' && t.progress === 100);
-    console.log(`[PollingService] Emitting 'torrents-updated' to session: ${sessionId}`);
-    console.log(`[PollingService] Number of torrents: ${updatedTorrents.length}`);
-    console.log('[PollingService] Torrent summary:', updatedTorrents.map(t => ({
+    logger.info(`[PollingService] Emitting 'torrents-updated' to session: ${sessionId}`);
+    logger.info(`[PollingService] Number of torrents: ${updatedTorrents.length}`);
+    logger.info('[PollingService] Torrent summary:', updatedTorrents.map(t => ({
       id: t.id,
       progress: t.progress,
       status: t.status
@@ -206,19 +207,19 @@ class PollingService {
   async processTorrentUpdate(torrent, listItem, updatedTorrents) {
     // Check if torrent transitioned to waiting_files_selection
     if (listItem.status === 'waiting_files_selection' && torrent.status !== 'waiting_files_selection') {
-      console.log(`[PollingService] Torrent ${torrent.id} needs file selection, triggering selectFiles`);
+      logger.info(`[PollingService] Torrent ${torrent.id} needs file selection, triggering selectFiles`);
       if (!rateLimitMonitor.canMakeRequest()) {
-        console.log('[PollingService] Rate limit reached, skipping selectFiles');
+        logger.info('[PollingService] Rate limit reached, skipping selectFiles');
       } else {
         try {
           rateLimitMonitor.recordRequest();
           if (rateLimitMonitor.canMakeRequest()) {
             rateLimitMonitor.recordRequest();
             await realDebridService.selectAllFiles(torrent.id);
-            console.log(`[PollingService] Successfully selected files for torrent ${torrent.id}`);
+            logger.info(`[PollingService] Successfully selected files for torrent ${torrent.id}`);
           }
         } catch (error) {
-          console.error(`[PollingService] Error selecting files for ${torrent.id}:`, error.message);
+          logger.error(`[PollingService] Error selecting files for ${torrent.id}:`, error.message);
         }
       }
     }
@@ -226,13 +227,13 @@ class PollingService {
     let unrestrictedLink = torrent.unrestrictedLink || null;
     if (!unrestrictedLink && listItem.status === 'downloaded' && listItem.links.length) {
       if (!rateLimitMonitor.canMakeRequest()) {
-        console.log('[PollingService] Rate limit reached, skipping unrestrict');
+        logger.info('[PollingService] Rate limit reached, skipping unrestrict');
       } else {
         try {
           rateLimitMonitor.recordRequest();
           unrestrictedLink = await realDebridService.getUnrestrictedLink(listItem.links[0]);
         } catch (error) {
-          console.error(`[PollingService] Error unrestricting link for ${torrent.id}:`, error.message);
+          logger.error(`[PollingService] Error unrestricting link for ${torrent.id}:`, error.message);
         }
       }
     }
@@ -245,8 +246,8 @@ class PollingService {
       unrestrictedLink
     };
     
-    if (DEBUG && torrent.progress !== listItem.progress) {
-      console.log(`[PollingService DEBUG] Progress updated for ${torrent.id}: ${torrent.progress} -> ${listItem.progress}`);
+    if (isDebug && torrent.progress !== listItem.progress) {
+      logger.debug(`[PollingService DEBUG] Progress updated for ${torrent.id}: ${torrent.progress} -> ${listItem.progress}`);
     }
     
     updatedTorrents.push(updated);
@@ -256,7 +257,7 @@ class PollingService {
    * Force an immediate poll (called when new torrents are added)
    */
   triggerImmediatePoll() {
-    console.log('[PollingService] Immediate poll triggered');
+    logger.info('[PollingService] Immediate poll triggered');
     
     // Start polling if not already running
     if (!this.isPolling) {

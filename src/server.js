@@ -8,6 +8,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import torrentsRouter from "./routes/torrents.js";
 import pollingService from "./services/pollingService.js";
+import logger from "./utils/logger.js";
 
 dotenv.config();
 
@@ -83,8 +84,8 @@ io.on('connection', (socket) => {
   if (session && sessionId) {
     socket.sessionId = sessionId;
     socket.join(sessionId);
-    console.log(`[Socket.IO] Client connected: ${socket.id} (session: ${sessionId})`);
-    console.log(`[Socket.IO] Socket joined room: ${sessionId}`);
+    logger.info(`[Socket.IO] Client connected: ${socket.id} (session: ${sessionId})`);
+    logger.debug(`[Socket.IO] Socket joined room: ${sessionId}`);
     
     // Send initial torrent data
     socket.emit('torrents-updated', {
@@ -94,7 +95,7 @@ io.on('connection', (socket) => {
   }
 
   socket.on('disconnect', () => {
-    console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
+    logger.info(`[Socket.IO] Client disconnected: ${socket.id}`);
   });
 });
 
@@ -107,7 +108,7 @@ setInterval(() => {
   
   sessionStore.all((err, sessions) => {
     if (err) {
-      console.error('[SessionCleanup] Error fetching sessions:', err);
+      logger.error('[SessionCleanup] Error fetching sessions:', err);
       return;
     }
 
@@ -121,7 +122,7 @@ setInterval(() => {
       if (session.lastActivity && session.lastActivity < sevenDaysAgo) {
         sessionStore.destroy(sessionId, (err) => {
           if (err) {
-            console.error(`[SessionCleanup] Error destroying session ${sessionId}:`, err);
+            logger.error(`[SessionCleanup] Error destroying session ${sessionId}:`, err);
           } else {
             cleanedCount++;
           }
@@ -130,12 +131,11 @@ setInterval(() => {
     }
 
     if (cleanedCount > 0) {
-      console.log(`[SessionCleanup] Cleaned up ${cleanedCount} stale session(s)`);
+      logger.info(`[SessionCleanup] Cleaned up ${cleanedCount} stale session(s)`);
     }
   });
 }, 60 * 60 * 1000); // Run every hour
 
 httpServer.listen(port, () => {
-  // eslint-disable-next-line no-console
-  console.log(`debrid-canal listening on port ${port}`);
+  logger.info(`debrid-canal listening on port ${port}`);
 });

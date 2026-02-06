@@ -4,6 +4,7 @@ import {
   refreshTorrentInfo
 } from "../services/realdebrid.js";
 import pollingService from "../services/pollingService.js";
+import logger from "../utils/logger.js";
 
 const isMagnetLink = (value) =>
   typeof value === "string" && value.trim().toLowerCase().startsWith("magnet:");
@@ -53,7 +54,7 @@ export const addMagnet = async (req, res) => {
 
     req.session.save((err) => {
       if (err) {
-        console.error("[Controller] Error saving session:", err);
+        logger.error("[Controller] Error saving session:", err);
       }
       emitSessionUpdate(req);
     });
@@ -63,7 +64,7 @@ export const addMagnet = async (req, res) => {
 
     return res.status(201).json(torrent);
   } catch (error) {
-    console.error('[Controller] Error adding magnet:', {
+    logger.error('[Controller] Error adding magnet:', {
       message: error.message,
       status: error.status,
       isRateLimit: error.isRateLimit,
@@ -96,7 +97,7 @@ export const addTorrentFile = async (req, res) => {
 
     req.session.save((err) => {
       if (err) {
-        console.error("[Controller] Error saving session:", err);
+        logger.error("[Controller] Error saving session:", err);
       }
       emitSessionUpdate(req);
     });
@@ -106,7 +107,7 @@ export const addTorrentFile = async (req, res) => {
 
     return res.status(201).json(torrent);
   } catch (error) {
-    console.error('[Controller] Error uploading torrent file:', {
+    logger.error('[Controller] Error uploading torrent file:', {
       message: error.message,
       status: error.status,
       isRateLimit: error.isRateLimit,
@@ -138,7 +139,7 @@ export const listTorrents = async (req, res) => {
     req.session.torrents = refreshed;
     return res.json(refreshed);
   } catch (error) {
-    console.error('[Controller] Error refreshing torrents:', {
+    logger.error('[Controller] Error refreshing torrents:', {
       message: error.message,
       status: error.status,
       isRateLimit: error.isRateLimit,

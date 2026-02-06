@@ -5,6 +5,8 @@
  * - On HTTP 429: blocks requests for 60 seconds
  */
 
+import logger from '../utils/logger.js';
+
 class RateLimitMonitor {
   constructor() {
     this.requestsPerMinute = [];
@@ -28,7 +30,7 @@ class RateLimitMonitor {
       // Cooldown period has elapsed, reset rate limit flag
       this.rateLimitHit = false;
       this.rateLimitUntil = null;
-      console.log('[RateLimitMonitor] Rate limit cooldown complete, resuming API requests');
+      logger.info('[RateLimitMonitor] Rate limit cooldown complete, resuming API requests');
     }
 
     // Clean up old requests (older than 1 minute)
@@ -53,7 +55,7 @@ class RateLimitMonitor {
   markRateLimitHit() {
     this.rateLimitHit = true;
     this.rateLimitUntil = Date.now() + this.rateLimitCooldownMs;
-    console.log(`[RateLimitMonitor] HTTP 429 detected - blocking requests until ${new Date(this.rateLimitUntil).toISOString()}`);
+    logger.warn(`[RateLimitMonitor] HTTP 429 detected - blocking requests until ${new Date(this.rateLimitUntil).toISOString()}`);
   }
 
   /**

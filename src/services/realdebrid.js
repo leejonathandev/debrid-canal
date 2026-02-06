@@ -1,16 +1,16 @@
 import axios from "axios";
 import dotenv from "dotenv";
 import rateLimitMonitor from "./rateLimitMonitor.js";
+import logger from "../utils/logger.js";
 
 dotenv.config();
 
 const API_BASE = "https://api.real-debrid.com/rest/1.0";
 const API_KEY = process.env.REALDEBRID_API_KEY;
-const DEBUG = process.env.LOG_LEVEL === 'debug';
+const isDebug = logger.isDebug();
 
 if (!API_KEY) {
-  // eslint-disable-next-line no-console
-  console.warn("REALDEBRID_API_KEY is not set. API calls will fail.");
+  logger.warn("REALDEBRID_API_KEY is not set. API calls will fail.");
 }
 
 const client = axios.create({
@@ -26,17 +26,17 @@ client.interceptors.response.use(
   (response) => {
     const method = response.config?.method?.toUpperCase() || 'REQUEST';
     const url = response.config?.url || '';
-    console.log(`[RealDebrid API] ${method} ${url} -> ${response.status}`);
+    logger.info(`[RealDebrid API] ${method} ${url} -> ${response.status}`);
     
-    if (DEBUG) {
-      console.log(`[RealDebrid API DEBUG] Full response for ${url}:`);
+    if (isDebug) {
+      logger.debug(`[RealDebrid API DEBUG] Full response for ${url}:`);
       if (Array.isArray(response.data)) {
-        console.log(`[RealDebrid API DEBUG] Array with ${response.data.length} items:`);
+        logger.debug(`[RealDebrid API DEBUG] Array with ${response.data.length} items:`);
         response.data.forEach((item, index) => {
-          console.log(`[RealDebrid API DEBUG] Item ${index}:`, JSON.stringify(item, null, 2));
+          logger.debug(`[RealDebrid API DEBUG] Item ${index}:`, JSON.stringify(item, null, 2));
         });
       } else {
-        console.log(JSON.stringify(response.data, null, 2));
+        logger.debug(JSON.stringify(response.data, null, 2));
       }
     }
     
@@ -47,12 +47,12 @@ client.interceptors.response.use(
     const method = error.config?.method?.toUpperCase() || 'REQUEST';
     const url = error.config?.url || '';
     if (status) {
-      console.warn(`[RealDebrid API] ${method} ${url} -> ${status}`);
+      logger.warn(`[RealDebrid API] ${method} ${url} -> ${status}`);
     }
 
     // Check for HTTP 429 rate limit error
     if (status === 429) {
-      console.error('[RealDebrid] HTTP 429 - Rate limit exceeded');
+      logger.error('[RealDebrid] HTTP 429 - Rate limit exceeded');
       rateLimitMonitor.markRateLimitHit();
       
       // Create a more informative error
@@ -88,8 +88,8 @@ const normalizeListItem = (item) => {
     links: Array.isArray(item.links) ? item.links : []
   };
   
-  if (DEBUG) {
-    console.log(
+  if (isDebug) {
+    logger.debug(
       `[RealDebrid DEBUG] Normalized torrent ${item.id} (hash=${item.hash}): status=${normalized.status}, progress=${normalized.progress}`
     );
   }
@@ -106,15 +106,15 @@ export const listTorrents = async ({ limit = 10 } = {}) => {
 
   // HTTP 204 (No Content) or empty response means no torrents
   if (response.status === 204 || !response.data) {
-    if (DEBUG) {
-      console.log('[RealDebrid DEBUG] No torrents found (204 or empty response)');
+    if (isDebug) {
+      logger.debug('[RealDebrid DEBUG] No torrents found (204 or empty response)');
     }
     return [];
   }
 
   if (!Array.isArray(response.data)) {
-    if (DEBUG) {
-      console.log('[RealDebrid DEBUG] Response data is not an array:', typeof response.data);
+    if (isDebug) {
+      logger.debug('[RealDebrid DEBUG] Response data is not an array:', typeof response.data);
     }
     return [];
   }
