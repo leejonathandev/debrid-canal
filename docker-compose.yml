@@ -1,5 +1,6 @@
 services:
   debrid-canal:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-owner}/debrid-canal:latest
     build: .
     ports:
       - "3000:3000"
@@ -7,3 +8,4 @@ services:
       - REALDEBRID_API_KEY=${REALDEBRID_API_KEY}
       - PORT=3000
       - SESSION_SECRET=${SESSION_SECRET:-change_me}
+      - LOG_LEVEL=${LOG_LEVEL:-info}

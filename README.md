@@ -52,6 +52,11 @@ PORT=3000
 LOG_LEVEL=debug  # Optional: trace, debug, info, warn, error, fatal
 ```
 
+You can also start from the example file:
+```bash
+cp .env.example .env
+```
+
 4. Start the server:
 ```bash
 npm start
@@ -76,6 +81,26 @@ docker run -d \
 Or using Docker Compose:
 ```bash
 docker-compose up -d
+```
+
+### GitHub Container Registry (GHCR)
+
+On every push to `main`, GitHub Actions builds and publishes:
+
+```
+ghcr.io/<owner>/debrid-canal:latest
+ghcr.io/<owner>/debrid-canal:<sha>
+```
+
+Pull and run:
+```bash
+docker pull ghcr.io/<owner>/debrid-canal:latest
+docker run -d \
+  -p 3000:3000 \
+  -e REALDEBRID_API_KEY=your_api_key_here \
+  -e SESSION_SECRET=change_me \
+  --name debrid-canal \
+  ghcr.io/<owner>/debrid-canal:latest
 ```
 
 ## Configuration
