@@ -186,25 +186,28 @@ export const cancelTorrent = async (req, res) => {
 
   req.session.torrents = req.session.torrents.filter((item) => item.id !== id);
 
-  req.session.save(async (saveError) => {
+  req.session.save((saveError) => {
     if (saveError) {
       logger.error("[Controller] Error saving session after cancel:", saveError);
       return res.status(500).json({ error: "Failed to cancel torrent." });
     }
 
     emitSessionUpdate(req);
+    res.status(204).send();
 
-    try {
-      await deleteTorrent(id);
-      if (torrent.downloadId) {
-        await deleteDownload(torrent.downloadId);
-      }
-    } catch (error) {
-      logger.warn(
-        `[Controller] Session torrent removed but Real-Debrid cleanup failed for id ${id}: ${error.message}`
-      );
-    }
+    Promise.resolve()
+      .then(async () => {
+        await deleteTorrent(id);
+        if (torrent.downloadId) {
+          await deleteDownload(torrent.downloadId);
+        }
+      })
+      .catch((error) => {
+        logger.warn(
+          `[Controller] Session torrent removed but Real-Debrid cleanup failed for id ${id}: ${error.message}`
+        );
+      });
 
-    return res.status(204).send();
+    return undefined;
   });
 };

@@ -83,11 +83,6 @@ const renderTorrents = (torrents) => {
         <div class="torrent-card__name">${torrent.name || "Untitled"}</div>
         <div class="torrent-card__header-actions">
           <div class="torrent-card__status">${torrent.status || "unknown"}</div>
-          ${
-            canCancel
-              ? `<button class="torrent-card__cancel" type="button" data-torrent-id="${torrent.id}" aria-label="Cancel ${torrent.name || "torrent"}">Cancel</button>`
-              : ""
-          }
         </div>
       </div>
       <div class="progress-bar">
@@ -103,8 +98,18 @@ const renderTorrents = (torrents) => {
       </div>
     `;
 
-    const cancelButton = card.querySelector(".torrent-card__cancel");
-    if (cancelButton) {
+    if (canCancel) {
+      const cancelButton = document.createElement("button");
+      cancelButton.className = "torrent-card__cancel";
+      cancelButton.type = "button";
+      cancelButton.textContent = "Cancel";
+      cancelButton.setAttribute("aria-label", `Cancel ${torrent.name || "torrent"}`);
+
+      const headerActions = card.querySelector(".torrent-card__header-actions");
+      if (headerActions) {
+        headerActions.appendChild(cancelButton);
+      }
+
       cancelButton.addEventListener("click", async () => {
         try {
           cancelButton.disabled = true;
