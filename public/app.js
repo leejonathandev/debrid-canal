@@ -74,7 +74,7 @@ const renderTorrents = (torrents) => {
   torrents.forEach((torrent) => {
     const card = document.createElement("div");
     card.className = "torrent-card";
-    const canCancel = torrent.status !== "downloaded";
+    const isCancelable = torrent.status !== "downloaded";
 
     const progressPercent = Math.min(100, Math.max(0, Number(torrent.progress)));
 
@@ -98,7 +98,7 @@ const renderTorrents = (torrents) => {
       </div>
     `;
 
-    if (canCancel) {
+    if (isCancelable) {
       const cancelButton = document.createElement("button");
       cancelButton.className = "torrent-card__cancel";
       cancelButton.type = "button";

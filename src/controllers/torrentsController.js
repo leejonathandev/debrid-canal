@@ -195,18 +195,18 @@ export const cancelTorrent = async (req, res) => {
     emitSessionUpdate(req);
     res.status(204).send();
 
-    Promise.resolve()
-      .then(async () => {
+    void (async () => {
+      try {
         await deleteTorrent(id);
         if (torrent.downloadId) {
           await deleteDownload(torrent.downloadId);
         }
-      })
-      .catch((error) => {
+      } catch (error) {
         logger.warn(
           `[Controller] Session torrent removed but Real-Debrid cleanup failed for id ${id}: ${error.message}`
         );
-      });
+      }
+    })();
 
   });
 };
