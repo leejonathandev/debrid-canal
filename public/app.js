@@ -85,7 +85,7 @@ const renderTorrents = (torrents) => {
           <div class="torrent-card__status">${torrent.status || "unknown"}</div>
           ${
             canCancel
-              ? `<button class="torrent-card__cancel" type="button" data-torrent-id="${torrent.id}" aria-label="Cancel ${torrent.name || "torrent"}">❌</button>`
+              ? `<button class="torrent-card__cancel" type="button" data-torrent-id="${torrent.id}" aria-label="Cancel ${torrent.name || "torrent"}">Cancel</button>`
               : ""
           }
         </div>
@@ -110,9 +110,7 @@ const renderTorrents = (torrents) => {
           cancelButton.disabled = true;
           setStatus("Cancelling torrent...");
           await cancelTorrent(torrent.id);
-          currentTorrents = currentTorrents.filter((item) => item.id !== torrent.id);
-          renderTorrents(currentTorrents);
-          setStatus("Torrent cancelled.");
+          setStatus("Torrent cancelled. Waiting for update...");
         } catch (error) {
           cancelButton.disabled = false;
           setStatus(error.message, "error");

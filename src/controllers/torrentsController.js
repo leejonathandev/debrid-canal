@@ -2,6 +2,7 @@ import {
   addMagnetToRealDebrid,
   addTorrentToRealDebrid,
   deleteDownload,
+  deleteTorrent,
   refreshTorrentInfo
 } from "../services/realdebrid.js";
 import pollingService from "../services/pollingService.js";
@@ -194,10 +195,13 @@ export const cancelTorrent = async (req, res) => {
     emitSessionUpdate(req);
 
     try {
-      await deleteDownload(id);
+      await deleteTorrent(id);
+      if (torrent.downloadId) {
+        await deleteDownload(torrent.downloadId);
+      }
     } catch (error) {
       logger.warn(
-        `[Controller] Session torrent removed but Real-Debrid delete failed for id ${id}: ${error.message}`
+        `[Controller] Session torrent removed but Real-Debrid cleanup failed for id ${id}: ${error.message}`
       );
     }
 
