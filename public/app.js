@@ -52,6 +52,17 @@ const submitMagnet = async (magnet) => {
   return response.json();
 };
 
+const cancelTorrent = async (torrentId) => {
+  const response = await fetch(`/api/torrents/${encodeURIComponent(torrentId)}`, {
+    method: "DELETE"
+  });
+
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || "Cancel failed");
+  }
+};
+
 const renderTorrents = (torrents) => {
   torrentList.innerHTML = "";
 
@@ -63,13 +74,21 @@ const renderTorrents = (torrents) => {
   torrents.forEach((torrent) => {
     const card = document.createElement("div");
     card.className = "torrent-card";
+    const canCancel = torrent.status !== "downloaded";
 
     const progressPercent = Math.min(100, Math.max(0, Number(torrent.progress)));
 
     card.innerHTML = `
       <div class="torrent-card__header">
         <div class="torrent-card__name">${torrent.name || "Untitled"}</div>
-        <div class="torrent-card__status">${torrent.status || "unknown"}</div>
+        <div class="torrent-card__header-actions">
+          <div class="torrent-card__status">${torrent.status || "unknown"}</div>
+          ${
+            canCancel
+              ? `<button class="torrent-card__cancel" type="button" data-torrent-id="${torrent.id}" aria-label="Cancel ${torrent.name || "torrent"}">❌</button>`
+              : ""
+          }
+        </div>
       </div>
       <div class="progress-bar">
         <div class="progress-bar__fill" style="width: ${progressPercent}%"></div>
@@ -83,6 +102,23 @@ const renderTorrents = (torrents) => {
         }
       </div>
     `;
+
+    const cancelButton = card.querySelector(".torrent-card__cancel");
+    if (cancelButton) {
+      cancelButton.addEventListener("click", async () => {
+        try {
+          cancelButton.disabled = true;
+          setStatus("Cancelling torrent...");
+          await cancelTorrent(torrent.id);
+          currentTorrents = currentTorrents.filter((item) => item.id !== torrent.id);
+          renderTorrents(currentTorrents);
+          setStatus("Torrent cancelled.");
+        } catch (error) {
+          cancelButton.disabled = false;
+          setStatus(error.message, "error");
+        }
+      });
+    }
 
     torrentList.appendChild(card);
   });

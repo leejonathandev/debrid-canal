@@ -207,6 +207,11 @@ export const getUnrestrictedLink = async (link) => {
   return response.data?.download || null;
 };
 
+export const deleteDownload = async (downloadId) => {
+  const response = await client.delete(`/downloads/delete/${downloadId}`);
+  return response.status === 204;
+};
+
 export const refreshTorrentInfo = async (torrent) => {
   const info = await getTorrentInfo(torrent.id);
 

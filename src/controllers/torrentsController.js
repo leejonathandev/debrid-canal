@@ -1,6 +1,7 @@
 import {
   addMagnetToRealDebrid,
   addTorrentToRealDebrid,
+  deleteDownload,
   refreshTorrentInfo
 } from "../services/realdebrid.js";
 import pollingService from "../services/pollingService.js";
@@ -172,4 +173,34 @@ export const refreshTorrent = async (req, res) => {
       .status(500)
       .json({ error: error.message || "Failed to refresh torrent." });
   }
+};
+
+export const cancelTorrent = async (req, res) => {
+  const { id } = req.params;
+  const torrent = findTorrent(req, id);
+
+  if (!torrent) {
+    return res.status(404).json({ error: "Torrent not found." });
+  }
+
+  req.session.torrents = req.session.torrents.filter((item) => item.id !== id);
+
+  req.session.save(async (saveError) => {
+    if (saveError) {
+      logger.error("[Controller] Error saving session after cancel:", saveError);
+      return res.status(500).json({ error: "Failed to cancel torrent." });
+    }
+
+    emitSessionUpdate(req);
+
+    try {
+      await deleteDownload(id);
+    } catch (error) {
+      logger.warn(
+        `[Controller] Session torrent removed but Real-Debrid delete failed for id ${id}: ${error.message}`
+      );
+    }
+
+    return res.status(204).send();
+  });
 };
