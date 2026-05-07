@@ -220,6 +220,8 @@ body {
   color: #2563eb;
   text-decoration: none;
   word-break: break-all;
+  display: block;
+  margin-bottom: 4px;
 }
 
 .torrent-card__link a:hover {

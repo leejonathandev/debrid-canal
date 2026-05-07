@@ -49,6 +49,7 @@ export const addMagnet = async (req, res) => {
       progress: result.progress ?? 0,
       addedAt: new Date().toISOString(),
       unrestrictedLink: result.unrestrictedLink || null,
+      unrestrictedLinks: result.unrestrictedLinks || [],
       error: null
     };
 
@@ -92,6 +93,7 @@ export const addTorrentFile = async (req, res) => {
       progress: result.progress ?? 0,
       addedAt: new Date().toISOString(),
       unrestrictedLink: result.unrestrictedLink || null,
+      unrestrictedLinks: result.unrestrictedLinks || [],
       error: null
     };
 
