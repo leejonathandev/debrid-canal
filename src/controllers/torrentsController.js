@@ -208,6 +208,5 @@ export const cancelTorrent = async (req, res) => {
         );
       });
 
-    return undefined;
   });
 };
