@@ -17,8 +17,8 @@ const upload = multer({
 });
 
 router.get("/", listTorrents);
-router.get("/:id/refresh", refreshTorrent);
 router.delete("/:id", cancelTorrent);
+router.post("/:id/refresh", refreshTorrent);
 router.post("/magnet", addMagnet);
 router.post("/upload", upload.single("torrent"), addTorrentFile);
 
