@@ -18,7 +18,7 @@ const ensureCsrfToken = async () => {
 
   const response = await fetch("/api/csrf-token");
   if (!response.ok) {
-    throw new Error("Failed to initialize request security token.");
+    throw new Error("Failed to fetch CSRF token.");
   }
 
   const data = await response.json();
