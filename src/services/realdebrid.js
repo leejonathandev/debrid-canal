@@ -67,6 +67,14 @@ client.interceptors.response.use(
 );
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const getFileName = (filePath, fallback) => {
+  if (typeof filePath !== "string" || !filePath.trim()) {
+    return fallback;
+  }
+
+  const segments = filePath.split("/").filter(Boolean);
+  return segments[segments.length - 1] || fallback;
+};
 
 const normalizeInfo = (info) => {
   return {
@@ -147,7 +155,8 @@ export const addTorrentToRealDebrid = async (file) => {
     name: listItem?.name || file.originalname,
     status: listItem?.status || "queued",
     progress: listItem?.progress ?? 0,
-    unrestrictedLink: null
+    unrestrictedLink: null,
+    unrestrictedLinks: []
   };
 };
 
@@ -177,7 +186,8 @@ export const addMagnetToRealDebrid = async (magnet) => {
     name: listItem?.name || "Magnet",
     status: listItem?.status || "queued",
     progress: listItem?.progress ?? 0,
-    unrestrictedLink: null
+    unrestrictedLink: null,
+    unrestrictedLinks: []
   };
 };
 
@@ -207,15 +217,45 @@ export const getUnrestrictedLink = async (link) => {
   return response.data?.download || null;
 };
 
+export const getUnrestrictedLinks = async (links, files = []) => {
+  if (!Array.isArray(links) || links.length === 0) {
+    return [];
+  }
+
+  const unresolved = await Promise.allSettled(
+    links.map((sourceLink) => getUnrestrictedLink(sourceLink))
+  );
+
+  return unresolved.flatMap((result, index) => {
+    if (result.status !== "fulfilled" || !result.value) {
+      return [];
+    }
+
+    return [
+      {
+        name: getFileName(files[index]?.path, `File ${index + 1}`),
+        url: result.value
+      }
+    ];
+  });
+};
+
 export const refreshTorrentInfo = async (torrent) => {
   const info = await getTorrentInfo(torrent.id);
 
   let unrestrictedLink = torrent.unrestrictedLink || null;
+  let unrestrictedLinks = Array.isArray(torrent.unrestrictedLinks)
+    ? torrent.unrestrictedLinks
+    : [];
 
-  if (!unrestrictedLink && info.links.length) {
+  if (!unrestrictedLinks.length && info.links.length) {
     if (info.status === "downloaded") {
-      unrestrictedLink = await getUnrestrictedLink(info.links[0]);
+      unrestrictedLinks = await getUnrestrictedLinks(info.links, info.files);
     }
+  }
+
+  if (!unrestrictedLink && unrestrictedLinks.length) {
+    unrestrictedLink = unrestrictedLinks[0].url;
   }
 
   return {
@@ -223,6 +263,7 @@ export const refreshTorrentInfo = async (torrent) => {
     name: info.name || torrent.name,
     status: info.status,
     progress: info.progress,
-    unrestrictedLink
+    unrestrictedLink,
+    unrestrictedLinks
   };
 };
