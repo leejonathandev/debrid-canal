@@ -18,6 +18,31 @@ const setStatus = (message, type = "info") => {
 const isMagnetLink = (value) =>
   typeof value === "string" && value.trim().toLowerCase().startsWith("magnet:");
 
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+
+const renderDownloadLinks = (torrent) => {
+  if (Array.isArray(torrent.unrestrictedLinks) && torrent.unrestrictedLinks.length) {
+    return torrent.unrestrictedLinks
+      .map(
+        (fileLink) =>
+          `<a href="${escapeHtml(fileLink.url)}" target="_blank" rel="noopener">${escapeHtml(fileLink.name || "Download")}</a>`
+      )
+      .join("");
+  }
+
+  if (torrent.unrestrictedLink) {
+    return `<a href="${escapeHtml(torrent.unrestrictedLink)}" target="_blank" rel="noopener">Download</a>`;
+  }
+
+  return "Waiting for unrestricted link...";
+};
+
 const uploadTorrent = async (file) => {
   const form = new FormData();
   form.append("torrent", file, file.name);
@@ -68,19 +93,15 @@ const renderTorrents = (torrents) => {
 
     card.innerHTML = `
       <div class="torrent-card__header">
-        <div class="torrent-card__name">${torrent.name || "Untitled"}</div>
-        <div class="torrent-card__status">${torrent.status || "unknown"}</div>
+        <div class="torrent-card__name">${escapeHtml(torrent.name || "Untitled")}</div>
+        <div class="torrent-card__status">${escapeHtml(torrent.status || "unknown")}</div>
       </div>
       <div class="progress-bar">
         <div class="progress-bar__fill" style="width: ${progressPercent}%"></div>
       </div>
       <div class="torrent-card__status">Progress: ${progressPercent}%</div>
       <div class="torrent-card__link">
-        ${
-          torrent.unrestrictedLink
-            ? `<a href="${torrent.unrestrictedLink}" target="_blank" rel="noopener">Download</a>`
-            : "Waiting for unrestricted link..."
-        }
+        ${renderDownloadLinks(torrent)}
       </div>
     `;
 

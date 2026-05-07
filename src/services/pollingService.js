@@ -225,17 +225,26 @@ class PollingService {
     }
 
     let unrestrictedLink = torrent.unrestrictedLink || null;
-    if (!unrestrictedLink && listItem.status === 'downloaded' && listItem.links.length) {
+    let unrestrictedLinks = Array.isArray(torrent.unrestrictedLinks)
+      ? torrent.unrestrictedLinks
+      : [];
+
+    if (!unrestrictedLinks.length && listItem.status === 'downloaded' && listItem.links.length) {
       if (!rateLimitMonitor.canMakeRequest()) {
         logger.info('[PollingService] Rate limit reached, skipping unrestrict');
       } else {
         try {
           rateLimitMonitor.recordRequest();
-          unrestrictedLink = await realDebridService.getUnrestrictedLink(listItem.links[0]);
+          const info = await realDebridService.getTorrentInfo(torrent.id);
+          unrestrictedLinks = await realDebridService.getUnrestrictedLinks(info.links, info.files);
         } catch (error) {
           logger.error(`[PollingService] Error unrestricting link for ${torrent.id}:`, error.message);
         }
       }
+    }
+
+    if (!unrestrictedLink && unrestrictedLinks.length) {
+      unrestrictedLink = unrestrictedLinks[0].url;
     }
 
     const updated = {
@@ -243,7 +252,8 @@ class PollingService {
       name: listItem.name || torrent.name,
       status: listItem.status,
       progress: listItem.progress,
-      unrestrictedLink
+      unrestrictedLink,
+      unrestrictedLinks
     };
     
     if (isDebug && torrent.progress !== listItem.progress) {
