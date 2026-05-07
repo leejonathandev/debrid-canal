@@ -3,6 +3,7 @@ import multer from "multer";
 import {
   addMagnet,
   addTorrentFile,
+  cancelTorrent,
   listTorrents,
   refreshTorrent
 } from "../controllers/torrentsController.js";
@@ -16,6 +17,7 @@ const upload = multer({
 });
 
 router.get("/", listTorrents);
+router.delete("/:id", cancelTorrent);
 router.post("/:id/refresh", refreshTorrent);
 router.post("/magnet", addMagnet);
 router.post("/upload", upload.single("torrent"), addTorrentFile);

@@ -217,6 +217,20 @@ export const getUnrestrictedLink = async (link) => {
   return response.data?.download || null;
 };
 
+const sanitizeResourceId = (value) => encodeURIComponent(String(value || "").trim());
+
+export const deleteTorrent = async (torrentId) => {
+  const safeId = sanitizeResourceId(torrentId);
+  const response = await client.delete(`/torrents/delete/${safeId}`);
+  return response.status === 204;
+};
+
+export const deleteDownload = async (downloadId) => {
+  const safeId = sanitizeResourceId(downloadId);
+  const response = await client.delete(`/downloads/delete/${safeId}`);
+  return response.status === 204;
+};
+
 export const getUnrestrictedLinks = async (links, files = []) => {
   if (!Array.isArray(links) || links.length === 0) {
     return [];
