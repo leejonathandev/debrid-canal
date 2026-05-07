@@ -189,14 +189,11 @@ body {
 }
 
 .torrent-card__cancel {
-  border: 1px solid #fecaca;
-  background: #fff1f2;
-  color: #be123c;
+  border: none;
+  background: transparent;
   cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border-radius: 999px;
-  padding: 4px 10px;
+  font-size: 1rem;
+  padding: 2px 4px;
   line-height: 1;
 }
 

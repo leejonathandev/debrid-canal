@@ -74,7 +74,7 @@ const renderTorrents = (torrents) => {
   torrents.forEach((torrent) => {
     const card = document.createElement("div");
     card.className = "torrent-card";
-    const isCancelable = torrent.status !== "downloaded";
+    const isDownloaded = torrent.status === "downloaded";
 
     const progressPercent = Math.min(100, Math.max(0, Number(torrent.progress)));
 
@@ -98,30 +98,31 @@ const renderTorrents = (torrents) => {
       </div>
     `;
 
-    if (isCancelable) {
-      const cancelButton = document.createElement("button");
-      cancelButton.className = "torrent-card__cancel";
-      cancelButton.type = "button";
-      cancelButton.textContent = "Cancel";
-      cancelButton.setAttribute("aria-label", `Cancel ${torrent.name || "torrent"}`);
+    const cancelButton = document.createElement("button");
+    cancelButton.className = "torrent-card__cancel";
+    cancelButton.type = "button";
+    cancelButton.textContent = "❌";
+    cancelButton.setAttribute(
+      "aria-label",
+      `${isDownloaded ? "Remove finished download" : "Cancel download"} ${torrent.name || "torrent"}`
+    );
 
-      const headerActions = card.querySelector(".torrent-card__header-actions");
-      if (headerActions) {
-        headerActions.appendChild(cancelButton);
-      }
-
-      cancelButton.addEventListener("click", async () => {
-        try {
-          cancelButton.disabled = true;
-          setStatus("Cancelling torrent...");
-          await cancelTorrent(torrent.id);
-          setStatus("Torrent cancelled. Waiting for update...");
-        } catch (error) {
-          cancelButton.disabled = false;
-          setStatus(error.message, "error");
-        }
-      });
+    const headerActions = card.querySelector(".torrent-card__header-actions");
+    if (headerActions) {
+      headerActions.appendChild(cancelButton);
     }
+
+    cancelButton.addEventListener("click", async () => {
+      try {
+        cancelButton.disabled = true;
+        setStatus(isDownloaded ? "Removing finished download..." : "Cancelling torrent...");
+        await cancelTorrent(torrent.id);
+        setStatus("Removed from list. Waiting for update...");
+      } catch (error) {
+        cancelButton.disabled = false;
+        setStatus(error.message, "error");
+      }
+    });
 
     torrentList.appendChild(card);
   });
