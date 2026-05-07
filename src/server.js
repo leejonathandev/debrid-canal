@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import csrf from "csurf";
 import torrentsRouter from "./routes/torrents.js";
 import pollingService from "./services/pollingService.js";
 import logger from "./utils/logger.js";
@@ -50,6 +51,11 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware);
 
+const csrfProtection = csrf();
+app.get("/api/csrf-token", csrfProtection, (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
+});
+
 // Track session activity
 app.use((req, _res, next) => {
   if (req.session) {
@@ -65,11 +71,18 @@ app.use((req, _res, next) => {
   next();
 });
 
-app.use("/api/torrents", torrentsRouter);
+app.use("/api/torrents", csrfProtection, torrentsRouter);
 app.use(express.static(path.join(__dirname, "../public")));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+app.use((err, _req, res, next) => {
+  if (err && err.code === "EBADCSRFTOKEN") {
+    return res.status(403).json({ error: "Invalid CSRF token" });
+  }
+  return next(err);
 });
 
 // Socket.IO configuration

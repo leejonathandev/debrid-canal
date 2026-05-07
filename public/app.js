@@ -9,6 +9,22 @@ const rateLimitCountdown = document.getElementById("rate-limit-countdown");
 
 // Initialize Socket.IO connection
 const socket = io();
+let csrfToken = "";
+
+const ensureCsrfToken = async () => {
+  if (csrfToken) {
+    return csrfToken;
+  }
+
+  const response = await fetch("/api/csrf-token");
+  if (!response.ok) {
+    throw new Error("Failed to fetch CSRF token.");
+  }
+
+  const data = await response.json();
+  csrfToken = data.csrfToken;
+  return csrfToken;
+};
 
 const setStatus = (message, type = "info") => {
   statusEl.textContent = message;
@@ -19,11 +35,15 @@ const isMagnetLink = (value) =>
   typeof value === "string" && value.trim().toLowerCase().startsWith("magnet:");
 
 const uploadTorrent = async (file) => {
+  const token = await ensureCsrfToken();
   const form = new FormData();
   form.append("torrent", file, file.name);
 
   const response = await fetch("/api/torrents/upload", {
     method: "POST",
+    headers: {
+      "CSRF-Token": token
+    },
     body: form
   });
 
@@ -36,10 +56,12 @@ const uploadTorrent = async (file) => {
 };
 
 const submitMagnet = async (magnet) => {
+  const token = await ensureCsrfToken();
   const response = await fetch("/api/torrents/magnet", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "CSRF-Token": token
     },
     body: JSON.stringify({ magnet })
   });
@@ -246,6 +268,7 @@ socket.on('rate-limit-hit', (data) => {
 });
 
 const init = async () => {
+  await ensureCsrfToken();
   dropZone.addEventListener("click", () => fileInput.click());
   dropZone.addEventListener("dragover", (event) => {
     event.preventDefault();
