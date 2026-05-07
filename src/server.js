@@ -52,10 +52,8 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 
 const csrfProtection = csrf();
-app.use(csrfProtection);
-app.use((req, res, next) => {
-  res.locals.csrfToken = req.csrfToken();
-  next();
+app.get("/api/csrf-token", csrfProtection, (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
 });
 
 // Track session activity
@@ -73,18 +71,18 @@ app.use((req, _res, next) => {
   next();
 });
 
+app.use("/api/torrents", csrfProtection, torrentsRouter);
+app.use(express.static(path.join(__dirname, "../public")));
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
 app.use((err, _req, res, next) => {
   if (err && err.code === "EBADCSRFTOKEN") {
     return res.status(403).json({ error: "Invalid CSRF token" });
   }
   return next(err);
-});
-
-app.use("/api/torrents", torrentsRouter);
-app.use(express.static(path.join(__dirname, "../public")));
-
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
 });
 
 // Socket.IO configuration
