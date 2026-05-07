@@ -222,23 +222,22 @@ export const getUnrestrictedLinks = async (links, files = []) => {
     return [];
   }
 
-  const unrestrictedLinks = [];
+  const unresolved = await Promise.allSettled(
+    links.map((sourceLink) => getUnrestrictedLink(sourceLink))
+  );
 
-  for (let index = 0; index < links.length; index += 1) {
-    const sourceLink = links[index];
-    const unrestrictedUrl = await getUnrestrictedLink(sourceLink);
-
-    if (!unrestrictedUrl) {
-      continue;
+  return unresolved.flatMap((result, index) => {
+    if (result.status !== "fulfilled" || !result.value) {
+      return [];
     }
 
-    unrestrictedLinks.push({
-      name: getFileName(files[index]?.path, `File ${index + 1}`),
-      url: unrestrictedUrl
-    });
-  }
-
-  return unrestrictedLinks;
+    return [
+      {
+        name: getFileName(files[index]?.path, `File ${index + 1}`),
+        url: result.value
+      }
+    ];
+  });
 };
 
 export const refreshTorrentInfo = async (torrent) => {
