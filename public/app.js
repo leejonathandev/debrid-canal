@@ -100,8 +100,12 @@ const submitMagnet = async (magnet) => {
 };
 
 const cancelTorrent = async (torrentId) => {
+  const token = await ensureCsrfToken();
   const response = await fetch(`/api/torrents/${encodeURIComponent(torrentId)}`, {
-    method: "DELETE"
+    method: "DELETE",
+    headers: {
+      "CSRF-Token": token
+    }
   });
 
   if (!response.ok) {
