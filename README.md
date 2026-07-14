@@ -77,6 +77,10 @@ When `AUTH_USER_HEADER` is set, the app namespaces per-user torrent lists by the
 
 The app trusts `X-Forwarded-*` headers based on `TRUST_PROXY` (default `1`). `1` matches "exactly one reverse proxy in front" — the common case (e.g. tinyauth directly). Set it to `2` if you have a CDN (Cloudflare, Fastly, etc.) in front of your auth proxy. Do not set it to `true` — that lets clients spoof `X-Forwarded-For` and bypass the trusted-hop count.
 
+### Rate limiting
+
+`/api/*` is rate-limited to **300 requests per 15-minute window per user** (or per client IP when `AUTH_USER_HEADER` is unset). The `/api/csrf-token` endpoint is limited more tightly to **30 requests per 15 minutes per IP**. Over-limit requests get `429` with a `Retry-After` header and an `error` JSON body. Both limits are tunable via `RATE_LIMIT_API` and `RATE_LIMIT_CSRF` env vars.
+
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 

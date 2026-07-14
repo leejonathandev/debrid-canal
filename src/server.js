@@ -11,6 +11,7 @@ import torrentsRouter from "./routes/torrents.js";
 import pollingService from "./services/pollingService.js";
 import logger from "./utils/logger.js";
 import { resolveSessionSecret } from "./utils/sessionSecret.js";
+import { apiLimiter, authLimiter } from "./middleware/rateLimit.js";
 
 dotenv.config();
 
@@ -92,6 +93,12 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware);
 
+// Per-/api/* rate limiter. Applied to the optional AUTH_USER_HEADER block
+// (the route CodeQL flagged for "missing rate limiting") and to the
+// /api/torrents router below. Must run AFTER sessionMiddleware so the
+// keyGenerator can read req.session.userId when AUTH_USER_HEADER is set.
+app.use("/api", apiLimiter);
+
 // Optional per-user binding middleware (runs after session so we can attach userId)
 if (authUserHeader) {
   app.use((req, res, next) => {
@@ -105,7 +112,7 @@ if (authUserHeader) {
 }
 
 const csrfProtection = csrf();
-app.get("/api/csrf-token", csrfProtection, (req, res) => {
+app.get("/api/csrf-token", authLimiter, csrfProtection, (req, res) => {
   res.json({ csrfToken: req.csrfToken() });
 });
 
