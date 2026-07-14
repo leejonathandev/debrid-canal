@@ -34,6 +34,49 @@ docker run -d \
 | `NODE_ENV` | Environment mode | No | production |
 | `LOG_LEVEL` | Logging level (trace, debug, info, warn, error, fatal) | No | info |
 
+See [`.env.example`](.env.example) for the full list, including session secret, data dir, auth proxy header, and `TRUST_PROXY`.
+
+## Deployment
+
+The app is intended to run **behind a reverse proxy** — do not expose port 3000 directly to the internet. Put something like tinyauth, oauth2-proxy, Authelia, Authentik, Traefik forward-auth, Caddy, or Nginx in front of it for TLS termination and (optionally) authentication.
+
+### Session secret
+
+`SESSION_SECRET` is **auto-generated on first start** — you don't need to set it. The app writes a 64-byte random secret (hex-encoded, mode `0600`) to `<DATA_DIR>/.session-secret` and reuses it on every subsequent start. The secret is **never logged**. If you want to control the value yourself (e.g. for replication across multiple instances), set `SESSION_SECRET` explicitly; otherwise leave it blank.
+
+To preserve the secret across image upgrades and container restarts, **mount the `./data` directory** to a host volume. For example in `docker-compose.yml`:
+
+```yaml
+volumes:
+  - ./data:/app/data
+```
+
+### Forward-auth proxy (`AUTH_USER_HEADER`)
+
+By default, the app runs in **anonymous mode** — each browser gets its own session and torrent list, with no notion of "user". This is the right mode if you have no auth proxy in front, or you don't care about per-user isolation.
+
+If you run a forward-auth proxy in front of the app, set `AUTH_USER_HEADER` to the name of the header the proxy uses to identify the logged-in user. The default header name for most of these proxies is `Remote-User`, so the common configuration is:
+
+```env
+AUTH_USER_HEADER=remote-user
+```
+
+Supported proxies (and the header they send by default):
+
+- tinyauth — `Remote-User`
+- oauth2-proxy — `X-Forwarded-User` (or `Remote-User` depending on config)
+- Authelia — `Remote-User`
+- Authentik — `Remote-User`
+- Traefik forward-auth — `Remote-User`
+- Caddy (with `forward_auth`) — `Remote-User`
+- Nginx (with `auth_request`) — `Remote-User` (set by `auth_request_set`)
+
+When `AUTH_USER_HEADER` is set, the app namespaces per-user torrent lists by the header's value, so multiple authenticated users on the same instance don't see each other's downloads. Requests to `/api/*` (and Socket.IO) **without** the configured header are rejected with `401`. Leaving `AUTH_USER_HEADER` blank disables the feature and falls back to the anonymous-per-browser behavior.
+
+### `TRUST_PROXY`
+
+The app trusts `X-Forwarded-*` headers based on `TRUST_PROXY` (default `1`). `1` matches "exactly one reverse proxy in front" — the common case (e.g. tinyauth directly). Set it to `2` if you have a CDN (Cloudflare, Fastly, etc.) in front of your auth proxy. Do not set it to `true` — that lets clients spoof `X-Forwarded-For` and bypass the trusted-hop count.
+
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
