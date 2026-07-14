@@ -8,8 +8,15 @@ import {
 import pollingService from "../services/pollingService.js";
 import logger from "../utils/logger.js";
 
-const isMagnetLink = (value) =>
-  typeof value === "string" && value.trim().toLowerCase().startsWith("magnet:");
+const MAX_MAGNET_LENGTH = 8 * 1024; // 8 KB — typical magnets are <2 KB; this is a generous cap.
+
+const isMagnetLink = (value) => {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return false;
+  if (trimmed.length > MAX_MAGNET_LENGTH) return false;
+  return trimmed.toLowerCase().startsWith("magnet:");
+};
 
 const findTorrent = (req, id) =>
   req.session.torrents.find((torrent) => torrent.id === id);
@@ -37,6 +44,10 @@ export const addMagnet = async (req, res) => {
 
   if (!isMagnetLink(magnet)) {
     return res.status(400).json({ error: "Invalid magnet link." });
+  }
+
+  if (magnet.trim().length > MAX_MAGNET_LENGTH) {
+    return res.status(400).json({ error: "Magnet link too long." });
   }
 
   try {

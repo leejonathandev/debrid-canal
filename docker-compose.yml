@@ -7,5 +7,10 @@ services:
     environment:
       - REALDEBRID_API_KEY=${REALDEBRID_API_KEY}
       - PORT=3000
-      - SESSION_SECRET=${SESSION_SECRET:-change_me}
+      - SESSION_SECRET=${SESSION_SECRET}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - AUTH_USER_HEADER=${AUTH_USER_HEADER:-}
+      - TRUST_PROXY=${TRUST_PROXY:-1}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
