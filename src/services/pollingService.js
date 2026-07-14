@@ -15,6 +15,25 @@ import logger from '../utils/logger.js';
 dotenv.config();
 const isDebug = logger.isDebug();
 
+// Jitter ratio applied to the polling interval (±20%) to spread load across
+// replicas and avoid synchronized hits on the Real-Debrid API.
+const JITTER_RATIO = 0.2;
+
+/**
+ * Return a random integer in the range
+ *   [baseMs * (1 - ratio), baseMs * (1 + ratio)]
+ * Used to add jitter to the polling interval. This is a load-spreading
+ * function, not a security control, so Math.random() is sufficient.
+ * @param {number} baseMs - The base interval in milliseconds.
+ * @param {number} ratio - The jitter ratio (e.g. 0.2 for ±20%).
+ * @returns {number} A random integer millisecond value within the jittered range.
+ */
+function jitteredInterval(baseMs, ratio) {
+  const min = baseMs * (1 - ratio);
+  const max = baseMs * (1 + ratio);
+  return Math.floor(Math.random() * (max - min + 1)) + Math.floor(min);
+}
+
 class PollingService {
   constructor() {
     this.io = null;
@@ -46,7 +65,9 @@ class PollingService {
 
     logger.info('[PollingService] Starting polling...');
     this.isPolling = true;
-    this.pollingInterval = setInterval(() => this.poll(), this.pollIntervalMs);
+    const chosenMs = jitteredInterval(this.pollIntervalMs, JITTER_RATIO);
+    logger.debug(`[PollingService] Next tick in ${chosenMs}ms (jittered from ${this.pollIntervalMs}ms)`);
+    this.pollingInterval = setInterval(() => this.poll(), chosenMs);
   }
 
   /**
