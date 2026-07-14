@@ -13,6 +13,18 @@ if (!API_KEY) {
   logger.warn("REALDEBRID_API_KEY is not set. API calls will fail.");
 }
 
+// Redact magnet:?... query strings from any string that may end up in a log line.
+const redactMagnet = (value) => {
+  if (typeof value !== "string") return value;
+  return value.replace(/magnet:\?[^"\s]*/gi, "magnet:?<redacted>");
+};
+
+const safeUrl = (config) => {
+  if (!config || !config.url) return "<unknown>";
+  const base = config.baseURL || API_BASE;
+  return redactMagnet(`${config.method?.toUpperCase() || "REQUEST"} ${base}${config.url}`);
+};
+
 const client = axios.create({
   baseURL: API_BASE,
   headers: {
@@ -21,47 +33,46 @@ const client = axios.create({
   timeout: 30000
 });
 
-// Add response interceptor to handle rate limiting and log status codes
+// Add response interceptor to handle rate limiting and log status codes.
+// Full response bodies are only dumped at debug level; the default info
+// level logs only method + URL + status, with magnet query strings redacted.
 client.interceptors.response.use(
   (response) => {
-    const method = response.config?.method?.toUpperCase() || 'REQUEST';
-    const url = response.config?.url || '';
-    logger.info(`[RealDebrid API] ${method} ${url} -> ${response.status}`);
-    
+    logger.info(`[RealDebrid API] ${safeUrl(response.config)} -> ${response.status}`);
+
     if (isDebug) {
-      logger.debug(`[RealDebrid API DEBUG] Full response for ${url}:`);
+      logger.debug(`[RealDebrid API DEBUG] Full response for ${safeUrl(response.config)}:`);
       if (Array.isArray(response.data)) {
-        logger.debug(`[RealDebrid API DEBUG] Array with ${response.data.length} items:`);
-        response.data.forEach((item, index) => {
-          logger.debug(`[RealDebrid API DEBUG] Item ${index}:`, JSON.stringify(item, null, 2));
-        });
-      } else {
-        logger.debug(JSON.stringify(response.data, null, 2));
+        logger.debug(`[RealDebrid API DEBUG] Array with ${response.data.length} items`);
+      } else if (response.data) {
+        // Stringify-and-redact to ensure no magnet:?... leaks even in debug mode.
+        const redacted = JSON.parse(JSON.stringify(response.data), (_k, v) =>
+          typeof v === "string" ? redactMagnet(v) : v
+        );
+        logger.debug(JSON.stringify(redacted, null, 2));
       }
     }
-    
+
     return response;
   },
   (error) => {
     const status = error.response?.status;
-    const method = error.config?.method?.toUpperCase() || 'REQUEST';
-    const url = error.config?.url || '';
+    const summary = safeUrl(error.config);
     if (status) {
-      logger.warn(`[RealDebrid API] ${method} ${url} -> ${status}`);
+      logger.warn(`[RealDebrid API] ${summary} -> ${status}`);
     }
 
     // Check for HTTP 429 rate limit error
     if (status === 429) {
       logger.error('[RealDebrid] HTTP 429 - Rate limit exceeded');
       rateLimitMonitor.markRateLimitHit();
-      
-      // Create a more informative error
+
       const rateLimitError = new Error('Rate limit exceeded. Please wait before making more requests.');
       rateLimitError.isRateLimit = true;
       rateLimitError.status = 429;
       throw rateLimitError;
     }
-    
+
     throw error;
   }
 );
@@ -95,13 +106,13 @@ const normalizeListItem = (item) => {
     progress: Number(item.progress || 0),
     links: Array.isArray(item.links) ? item.links : []
   };
-  
+
   if (isDebug) {
     logger.debug(
       `[RealDebrid DEBUG] Normalized torrent ${item.id} (hash=${item.hash}): status=${normalized.status}, progress=${normalized.progress}`
     );
   }
-  
+
   return normalized;
 };
 
