@@ -1,4 +1,5 @@
 import express from "express";
+import cookieParser from "cookie-parser";
 import session from "express-session";
 import morgan from "morgan";
 import dotenv from "dotenv";
@@ -6,7 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import csrf from "csurf";
+import { doubleCsrf } from "csrf-csrf";
 import torrentsRouter from "./routes/torrents.js";
 import pollingService from "./services/pollingService.js";
 import logger from "./utils/logger.js";
@@ -26,6 +27,7 @@ app.set("trust proxy", 1);
 app.use(morgan(':remote-addr - :method :url :status :response-time ms - :res[content-length]'));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // Attach Socket.IO instance to requests
 app.use((req, _res, next) => {
@@ -51,9 +53,27 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware);
 
-const csrfProtection = csrf();
-app.get("/api/csrf-token", csrfProtection, (req, res) => {
-  res.json({ csrfToken: req.csrfToken() });
+const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
+  getSecret: () => process.env.SESSION_SECRET || "debrid-canal-secret",
+  getSessionIdentifier: (req) => req.sessionID,
+  cookieName: "debrid_canal_csrf",
+  cookieOptions: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production"
+  },
+  errorConfig: {
+    statusCode: 403,
+    message: "Invalid CSRF token",
+    code: "EBADCSRFTOKEN"
+  },
+  // The client sends the token in the CSRF-Token header (see public/app.js)
+  getCsrfTokenFromRequest: (req) =>
+    req.headers["csrf-token"] || req.body?._csrf || req.query?._csrf
+});
+
+app.get("/api/csrf-token", (req, res) => {
+  res.json({ csrfToken: generateCsrfToken(req, res, {}) });
 });
 
 // Track session activity
@@ -71,7 +91,7 @@ app.use((req, _res, next) => {
   next();
 });
 
-app.use("/api/torrents", csrfProtection, torrentsRouter);
+app.use("/api/torrents", doubleCsrfProtection, torrentsRouter);
 app.use(express.static(path.join(__dirname, "../public")));
 
 app.get("/health", (_req, res) => {
