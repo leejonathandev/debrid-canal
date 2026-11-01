@@ -1,304 +1,103 @@
-/**
- * Polling Service
- * Server-side centralized polling for torrent updates
- * - Polls every 5 seconds when there are active downloads
- * - Stops polling when all torrents are downloaded
- * - Checks rate limit before making API calls
- * - Broadcasts updates to clients via Socket.IO
- */
+import { createRealDebridService } from "./realdebrid.js";
+import rateLimitMonitor from "./rateLimitMonitor.js";
+import { callStore } from "./sessionTorrents.js";
+import { needsPolling } from "./torrentState.js";
+import logger from "../utils/logger.js";
 
-import rateLimitMonitor from './rateLimitMonitor.js';
-import * as realDebridService from './realdebrid.js';
-import dotenv from 'dotenv';
-import logger from '../utils/logger.js';
-
-dotenv.config();
-const isDebug = logger.isDebug();
-
-// Jitter ratio applied to the polling interval (±20%) to spread load across
-// replicas and avoid synchronized hits on the Real-Debrid API.
-const JITTER_RATIO = 0.2;
-
-/**
- * Return a random integer in the range
- *   [baseMs * (1 - ratio), baseMs * (1 + ratio)]
- * Used to add jitter to the polling interval. This is a load-spreading
- * function, not a security control, so Math.random() is sufficient.
- * @param {number} baseMs - The base interval in milliseconds.
- * @param {number} ratio - The jitter ratio (e.g. 0.2 for ±20%).
- * @returns {number} A random integer millisecond value within the jittered range.
- */
-function jitteredInterval(baseMs, ratio) {
-  const min = baseMs * (1 - ratio);
-  const max = baseMs * (1 + ratio);
-  return Math.floor(Math.random() * (max - min + 1)) + Math.floor(min);
-}
-
-class PollingService {
-  constructor() {
-    this.io = null;
-    this.sessionStore = null;
-    this.pollingInterval = null;
+export class PollingService {
+  constructor({ service, monitor = rateLimitMonitor, intervalMs = 5000 } = {}) {
+    this.service = service || createRealDebridService({ monitor });
+    this.monitor = monitor;
+    this.intervalMs = intervalMs;
+    this.timer = null;
+    this.inFlight = null;
     this.isPolling = false;
-    this.pollIntervalMs = 5000; // 5 seconds for active downloads
-    this.lastSessionLogAt = 0; // For throttling session count logs
+    this.generation = 0;
   }
 
-  /**
-   * Initialize the polling service with Socket.IO instance and session store
-   * @param {SocketIO.Server} io - Socket.IO server instance
-   * @param {SessionStore} sessionStore - Express session store
-   */
-  initialize(io, sessionStore) {
+  initialize(io, sessionStore, sessions) {
     this.io = io;
     this.sessionStore = sessionStore;
-    logger.info('[PollingService] Initialized');
+    this.sessions = sessions;
   }
 
-  /**
-   * Start polling if not already running
-   */
   start() {
-    if (this.isPolling) {
-      return;
-    }
-
-    logger.info('[PollingService] Starting polling...');
+    if (this.isPolling) return;
     this.isPolling = true;
-    const chosenMs = jitteredInterval(this.pollIntervalMs, JITTER_RATIO);
-    logger.debug(`[PollingService] Next tick in ${chosenMs}ms (jittered from ${this.pollIntervalMs}ms)`);
-    this.pollingInterval = setInterval(() => this.poll(), chosenMs);
+    this.timer = setInterval(() => { void this.poll(); }, this.intervalMs);
+    this.timer.unref?.();
   }
 
-  /**
-   * Stop polling
-   */
   stop() {
-    if (!this.isPolling) {
-      return;
-    }
-
-    logger.info('[PollingService] Stopping polling...');
     this.isPolling = false;
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
-    }
+    clearInterval(this.timer);
+    this.timer = null;
   }
 
-  /**
-   * Main polling loop - runs every 5 seconds
-   */
-  async poll() {
-    if (!this.io || !this.sessionStore) {
-      logger.warn('[PollingService] Poll skipped: missing io or sessionStore');
-      return;
-    }
-
-    // Check rate limit before proceeding
-    if (rateLimitMonitor.isRateLimited()) {
-      const timeRemaining = rateLimitMonitor.getTimeUntilReset();
-      // Broadcast rate limit status to all clients
-      this.io.emit('rate-limit-hit', { 
-        timeRemaining: Math.ceil(timeRemaining / 1000) 
-      });
-      return;
-    }
-
-    // Get all active sessions
-    this.sessionStore.all(async (err, sessions) => {
-      if (err) {
-        logger.error('[PollingService] Error fetching sessions:', err);
-        return;
-      }
-
-      const sessionIds = sessions ? Object.keys(sessions) : [];
-      if (sessionIds.length === 0) {
-        // No active sessions, stop polling
-        this.stop();
-        return;
-      }
-
-      let hasActiveTorrents = false;
-
-      const listLimit = Math.max(10, sessionIds.length * 10);
-
-      let accountTorrents = [];
-      try {
-        if (rateLimitMonitor.canMakeRequest()) {
-          rateLimitMonitor.recordRequest();
-          accountTorrents = await realDebridService.listTorrents({
-            limit: listLimit
-          });
-        } else {
-          logger.info('[PollingService] Rate limit reached, skipping listTorrents');
-        }
-      } catch (error) {
-        logger.error('[PollingService] Error listing torrents:', error.message);
-      }
-
-      const torrentMap = new Map(accountTorrents.map((item) => [item.id, item]));
-
-      // Process each session - log once per minute
-      const now = Date.now();
-      if (now - this.lastSessionLogAt >= 60 * 1000) {
-        logger.info(`[PollingService] Polling ${sessionIds.length} session(s)`);
-        this.lastSessionLogAt = now;
-      }
-
-      for (const sessionId in sessions) {
-        const session = sessions[sessionId];
-        
-        if (!session.torrents || session.torrents.length === 0) {
-          continue;
-        }
-
-        // Always refresh torrents for this session to avoid stale data
-        const updatedTorrents = await this.refreshSessionTorrents(sessionId, session, torrentMap);
-        if (updatedTorrents && updatedTorrents.some(t => t.status === 'downloading')) {
-          hasActiveTorrents = true;
-        }
-      }
-
-      // If no active torrents across all sessions, stop polling
-      if (!hasActiveTorrents) {
-        logger.info('[PollingService] No active torrents, stopping polling');
-        this.stop();
-      }
-    });
-  }
-
-  /**
-   * Refresh torrents for a specific session
-   * @param {string} sessionId - Session ID
-   * @param {object} session - Session object
-   */
-  async refreshSessionTorrents(sessionId, session, torrentMap) {
-    if (!session.torrents || session.torrents.length === 0) {
-      return [];
-    }
-
-    const updatedTorrents = [];
-
-    for (const torrent of session.torrents) {
-      const listItem = torrentMap?.get(torrent.id);
-
-      if (!listItem) {
-        updatedTorrents.push(torrent);
-        continue;
-      }
-
-      // Process torrent with list item data
-      await this.processTorrentUpdate(torrent, listItem, updatedTorrents);
-    }
-
-    // Update session with new torrent data
-    session.torrents = updatedTorrents;
-    
-    // Save session
-    this.sessionStore.set(sessionId, session, (err) => {
-      if (err) {
-        logger.error('[PollingService] Error saving session:', err);
-      }
-    });
-
-    // Broadcast update to all sockets associated with this session
-    const allComplete = updatedTorrents.every(t => t.status === 'downloaded' && t.progress === 100);
-    logger.info(`[PollingService] Emitting 'torrents-updated' to session: ${sessionId}`);
-    logger.info(`[PollingService] Number of torrents: ${updatedTorrents.length}`);
-    logger.info('[PollingService] Torrent summary:', updatedTorrents.map(t => ({
-      id: t.id,
-      progress: t.progress,
-      status: t.status
-    })));
-    this.io.to(sessionId).emit('torrents-updated', {
-      torrents: updatedTorrents,
-      allComplete
-    });
-
-    return updatedTorrents;
-  }
-
-  /**
-   * Process a single torrent update with list item data
-   * @param {object} torrent - Current torrent data from session
-   * @param {object} listItem - Fresh data from API
-   * @param {Array} updatedTorrents - Array to push updated torrent to
-   */
-  async processTorrentUpdate(torrent, listItem, updatedTorrents) {
-    // Check if torrent transitioned to waiting_files_selection
-    if (listItem.status === 'waiting_files_selection' && torrent.status !== 'waiting_files_selection') {
-      logger.info(`[PollingService] Torrent ${torrent.id} needs file selection, triggering selectFiles`);
-      if (!rateLimitMonitor.canMakeRequest()) {
-        logger.info('[PollingService] Rate limit reached, skipping selectFiles');
-      } else {
-        try {
-          rateLimitMonitor.recordRequest();
-          if (rateLimitMonitor.canMakeRequest()) {
-            rateLimitMonitor.recordRequest();
-            await realDebridService.selectAllFiles(torrent.id);
-            logger.info(`[PollingService] Successfully selected files for torrent ${torrent.id}`);
-          }
-        } catch (error) {
-          logger.error(`[PollingService] Error selecting files for ${torrent.id}:`, error.message);
-        }
-      }
-    }
-
-    let unrestrictedLink = torrent.unrestrictedLink || null;
-    let unrestrictedLinks = Array.isArray(torrent.unrestrictedLinks)
-      ? torrent.unrestrictedLinks
-      : [];
-
-    if (!unrestrictedLinks.length && listItem.status === 'downloaded' && listItem.links.length) {
-      if (!rateLimitMonitor.canMakeRequest()) {
-        logger.info('[PollingService] Rate limit reached, skipping unrestrict');
-      } else {
-        try {
-          rateLimitMonitor.recordRequest();
-          const info = await realDebridService.getTorrentInfo(torrent.id);
-          unrestrictedLinks = await realDebridService.getUnrestrictedLinks(info.links, info.files);
-        } catch (error) {
-          logger.error(`[PollingService] Error unrestricting link for ${torrent.id}:`, error.message);
-        }
-      }
-    }
-
-    if (!unrestrictedLink && unrestrictedLinks.length) {
-      unrestrictedLink = unrestrictedLinks[0].url;
-    }
-
-    const updated = {
-      ...torrent,
-      name: listItem.name || torrent.name,
-      status: listItem.status,
-      progress: listItem.progress,
-      unrestrictedLink,
-      unrestrictedLinks
-    };
-    
-    if (isDebug && torrent.progress !== listItem.progress) {
-      logger.debug(`[PollingService DEBUG] Progress updated for ${torrent.id}: ${torrent.progress} -> ${listItem.progress}`);
-    }
-    
-    updatedTorrents.push(updated);
-  }
-
-  /**
-   * Force an immediate poll (called when new torrents are added)
-   */
   triggerImmediatePoll() {
-    logger.info('[PollingService] Immediate poll triggered');
-    
-    // Start polling if not already running
-    if (!this.isPolling) {
-      this.start();
+    this.generation++;
+    this.start();
+    return this.poll();
+  }
+
+  poll() {
+    if (this.inFlight) return this.inFlight;
+    this.inFlight = this.runCycle().catch(error => {
+      logger.error("[PollingService] Poll failed:", error.message);
+    }).finally(() => { this.inFlight = null; });
+    return this.inFlight;
+  }
+
+  async runCycle() {
+    if (!this.sessions) return;
+    const generation = this.generation;
+    if (this.monitor.isRateLimited()) {
+      this.io.emit("rate-limit-hit", { timeRemaining: Math.ceil(this.monitor.getTimeUntilReset() / 1000) });
+      return;
     }
-    
-    // Execute poll immediately
-    this.poll();
+    const all = await callStore(this.sessionStore, "all");
+    const ids = Object.keys(all || {}).filter(id => all[id].torrents?.some(needsPolling));
+    if (!ids.length) {
+      if (generation === this.generation) this.stop();
+      return;
+    }
+    // A failed listing is not evidence that a tracked torrent disappeared.
+    let listed = [];
+    try {
+      listed = await this.service.listTorrents({ limit: Math.min(5000, Math.max(10, ids.length * 10)) });
+    } catch (error) {
+      logger.warn("[PollingService] Account listing failed:", error.message);
+    }
+    const map = new Map(listed.map(t => [t.id, t]));
+    let active = false;
+    for (const id of ids) {
+      try {
+        const torrents = await this.sessions.mutate(id, async current => {
+          const updated = [];
+          for (const torrent of current) {
+            if (!needsPolling(torrent)) { updated.push(torrent); continue; }
+            try {
+              // Falls back to /info for items outside the account listing.
+              updated.push(await this.service.refreshTorrentInfo(torrent, map.get(torrent.id)));
+            } catch (error) {
+              if (error.response?.status === 404) {
+                updated.push({ ...torrent, status: "dead", error: "Torrent no longer exists on Real-Debrid." });
+              } else {
+                updated.push({ ...torrent, error: "Update failed; retrying." });
+                logger.warn("[PollingService] Torrent update failed:", error.message);
+              }
+            }
+          }
+          return updated;
+        });
+        active ||= torrents.some(needsPolling);
+      } catch (error) {
+        if (error.status !== 410) {
+          active = true;
+          logger.error("[PollingService] Session update failed:", error.message);
+        }
+      }
+    }
+    if (!active && generation === this.generation) this.stop();
   }
 }
-
-// Export singleton instance
-export default new PollingService();

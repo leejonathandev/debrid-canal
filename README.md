@@ -1,88 +1,76 @@
 # debrid-canal
-A Node.js web server that provides a simple interface for uploading torrent files or magnet links and retrieving download links via RealDebrid's API.
 
-## Setup
-### Requirements
-- Node.js (LTS version recommended)
-- RealDebrid account with an active [API key](https://real-debrid.com/apitoken) 
-- Docker (optional, for containerized deployment)
+A Node.js web interface for uploading torrent files or magnet links and retrieving Real-Debrid download links. Torrents belong to individual browser sessions; TinyAuth handles sign-in outside the application.
 
-### Node
+## Local setup
+
+Requires Node.js 24 or newer and an active [Real-Debrid API key](https://real-debrid.com/apitoken).
+
 ```bash
-git clone https://github.com/yourusername/debrid-canal.git
-npm install
-cp .env.example .env # add in your API key
+git clone https://github.com/leejonathandev/debrid-canal.git
+cd debrid-canal
+npm ci
+cp .env.example .env
+# Edit .env to add your Real-Debrid API key.
 npm start
 ```
 
-### Docker Image
+Open [localhost:3000](http://localhost:3000). Development mode supports HTTP and creates a temporary random session secret when none is configured. Use this mode only on a trusted development machine.
+
+## Production with TinyAuth and Traefik
+
+The supported deployment uses Traefik for HTTPS and TinyAuth with OAuth for authentication. The application does not provide a second login system or trust user identity headers. Keep the backend accessible only to your trusted proxy network.
+
+1. Set `REALDEBRID_API_KEY` in `.env` and generate `SESSION_SECRET` with `openssl rand -hex 32`. Production rejects missing, short, or known placeholder secrets. The same secret protects session cookies and CSRF tokens.
+2. Attach the Compose service to your existing Traefik Docker network and configure your existing HTTPS router to send traffic to container port 3000. The included Compose file does **not** publish a host port. Do not add a publicly reachable port mapping.
+3. Apply your TinyAuth forward-auth middleware to the whole application router, including `/api/*` and `/socket.io/*`. Protect both Engine.IO polling requests and WebSocket upgrades. Do not create an unprotected Socket.IO router.
+4. Set `TRUST_PROXY` to the exact trusted proxy-hop count. A single Traefik hop uses `1`. Keep Traefik's forwarded-header trust restricted to your actual upstream proxies; browser-supplied forwarded headers must not be accepted as authoritative.
+5. Build and start with `docker compose up -d --build`. The image runs as the unprivileged `node` user on Node.js 24.
+
+For a prebuilt image, use `ghcr.io/leejonathandev/debrid-canal:latest` (the source repository's validated main pushes publish this image). Set `GITHUB_REPOSITORY_OWNER=leejonathandev` when using the included Compose file with that image, or substitute your own registry owner.
+
+### Deployment checks
+
+- An unauthenticated request to the public application, `/api/torrents`, and `/socket.io/?EIO=4&transport=polling` must be rejected or redirected by TinyAuth. Test WebSocket upgrades as well; they must not succeed anonymously.
+- After OAuth sign-in, uploads, live progress updates, download links, and cancellation must work over HTTPS.
+- The host must not expose the backend's port 3000. `/health` and `/ready` can be probed from inside the trusted container network without publishing the port.
+- `/health` reports process liveness. `/ready` returns 503 when an API key is missing or still set to the documented placeholder; it does not call Real-Debrid or validate account status.
+
+These are checks to run against your deployment; repository tests cannot verify your deployed Traefik or TinyAuth configuration.
+
+### Sessions and restart behavior
+
+The app intentionally uses a single-process in-memory session store. Restarting or replacing the container loses browser torrent lists and download metadata, even when the session secret is unchanged. Torrents and generated downloads can remain in your Real-Debrid account; use Real-Debrid's interface to manage those after a restart. A persistent secret does not persist session data. Multiple replicas and durable session storage are not supported in this version.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `REALDEBRID_API_KEY` | none | Required to use Real-Debrid. |
+| `SESSION_SECRET` | temporary random value in development | Production requires at least 32 characters and rejects known placeholders. Generate 32 random bytes or more. |
+| `NODE_ENV` | development; production in Docker | Production enables Secure cookies and strict secret validation. |
+| `PORT` | 3000 | HTTP listen port behind the proxy. |
+| `TRUST_PROXY` | 1 | Trusted hop count, 0–10; `false` disables proxy trust. |
+| `LOG_LEVEL` | info | trace, debug, info, warn, error, fatal. Request bodies and download URLs are not logged. |
+| `RATE_LIMIT_API` | 300 | API requests per client IP per 15 minutes. |
+| `RATE_LIMIT_CSRF` | 30 | Additional CSRF-token request limit per client IP per 15 minutes. |
+
+All mutating torrent requests require a session-bound token in the `CSRF-Token` header, including the legacy `GET /api/torrents?refresh=1` option, which can generate upstream links. Obtain it from `GET /api/csrf-token`; tokens in query strings or request bodies are not accepted. Responses use JSON errors; size-limit violations return 413, CSRF failures return 403, and request limits return 429 with `Retry-After`.
+
+The upload limit is 50 MB, with one `.torrent` file per request. Filename checks are an input filter; Real-Debrid validates torrent contents. Magnet links are limited to 8 KB.
+
+Every Real-Debrid request shares a budget of 250 attempts per minute, four concurrent operations, and at most 64 queued operations. HTTP 429 pauses new upstream requests for at least 60 seconds and honors longer `Retry-After` values. Failed requests count toward the budget. Background polling retries transient failures and incomplete download links; terminal torrent errors stop polling. Cancellation waits for in-progress session updates and removes the upstream torrent and its known generated downloads. Cleanup failures leave the item available for retry rather than reporting successful removal.
+
+## Validation
+
 ```bash
-docker pull ghcr.io/<owner>/debrid-canal:latest
-docker run -d \
-  -p 3000:3000 \
-  -e REALDEBRID_API_KEY=your_api_key_here \
-  -e SESSION_SECRET=change_me \
-  --name debrid-canal \
-  ghcr.io/<owner>/debrid-canal:latest
+npm ci --ignore-scripts
+npm test
+npm audit --audit-level=low
 ```
 
-### Environment Variables
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `REALDEBRID_API_KEY` | Your RealDebrid API key | Yes | - |
-| `PORT` | Port for the web server | No | 3000 |
-| `NODE_ENV` | Environment mode | No | production |
-| `LOG_LEVEL` | Logging level (trace, debug, info, warn, error, fatal) | No | info |
-
-See [`.env.example`](.env.example) for the full list, including session secret, data dir, auth proxy header, and `TRUST_PROXY`.
-
-## Deployment
-
-The app is intended to run **behind a reverse proxy** — do not expose port 3000 directly to the internet. Put something like tinyauth, oauth2-proxy, Authelia, Authentik, Traefik forward-auth, Caddy, or Nginx in front of it for TLS termination and (optionally) authentication.
-
-### Session secret
-
-`SESSION_SECRET` is **auto-generated on first start** — you don't need to set it. The app writes a 64-byte random secret (hex-encoded, mode `0600`) to `<DATA_DIR>/.session-secret` and reuses it on every subsequent start. The secret is **never logged**. If you want to control the value yourself (e.g. for replication across multiple instances), set `SESSION_SECRET` explicitly; otherwise leave it blank.
-
-To preserve the secret across image upgrades and container restarts, **mount the `./data` directory** to a host volume. For example in `docker-compose.yml`:
-
-```yaml
-volumes:
-  - ./data:/app/data
-```
-
-### Forward-auth proxy (`AUTH_USER_HEADER`)
-
-By default, the app runs in **anonymous mode** — each browser gets its own session and torrent list, with no notion of "user". This is the right mode if you have no auth proxy in front, or you don't care about per-user isolation.
-
-If you run a forward-auth proxy in front of the app, set `AUTH_USER_HEADER` to the name of the header the proxy uses to identify the logged-in user. The default header name for most of these proxies is `Remote-User`, so the common configuration is:
-
-```env
-AUTH_USER_HEADER=remote-user
-```
-
-Supported proxies (and the header they send by default):
-
-- tinyauth — `Remote-User`
-- oauth2-proxy — `X-Forwarded-User` (or `Remote-User` depending on config)
-- Authelia — `Remote-User`
-- Authentik — `Remote-User`
-- Traefik forward-auth — `Remote-User`
-- Caddy (with `forward_auth`) — `Remote-User`
-- Nginx (with `auth_request`) — `Remote-User` (set by `auth_request_set`)
-
-When `AUTH_USER_HEADER` is set, the app namespaces per-user torrent lists by the header's value, so multiple authenticated users on the same instance don't see each other's downloads. Requests to `/api/*` (and Socket.IO) **without** the configured header are rejected with `401`. Leaving `AUTH_USER_HEADER` blank disables the feature and falls back to the anonymous-per-browser behavior.
-
-### `TRUST_PROXY`
-
-The app trusts `X-Forwarded-*` headers based on `TRUST_PROXY` (default `1`). `1` matches "exactly one reverse proxy in front" — the common case (e.g. tinyauth directly). Set it to `2` if you have a CDN (Cloudflare, Fastly, etc.) in front of your auth proxy. Do not set it to `true` — that lets clients spoof `X-Forwarded-For` and bypass the trusted-hop count.
-
-### Rate limiting
-
-`/api/*` is rate-limited to **300 requests per 15-minute window per user** (or per client IP when `AUTH_USER_HEADER` is unset). The `/api/csrf-token` endpoint is limited more tightly to **30 requests per 15 minutes per IP**. Over-limit requests get `429` with a `Retry-After` header and an `error` JSON body. Both limits are tunable via `RATE_LIMIT_API` and `RATE_LIMIT_CSRF` env vars.
+Tests use mocked Real-Debrid responses and local HTTP/WebSocket servers; no real API key is needed. CI tests Node.js 24 and 26, audits all dependencies, and builds the container on PRs. Publishing to GHCR occurs only after tests and audits pass on `main`.
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Disclaimer
-This tool is for personal use only. Please respect RealDebrid's terms of service and API usage limits. The developers are not responsible for any misuse of this software.
+MIT. This tool is for personal use. Respect Real-Debrid's terms and API limits.

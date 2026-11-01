@@ -8,7 +8,7 @@ const rateLimitBanner = document.getElementById("rate-limit-banner");
 const rateLimitCountdown = document.getElementById("rate-limit-countdown");
 
 // Initialize Socket.IO connection
-const socket = io();
+const socket = io({ autoConnect: false });
 let csrfToken = "";
 
 const ensureCsrfToken = async () => {
@@ -334,6 +334,7 @@ socket.on('rate-limit-hit', (data) => {
 
 const init = async () => {
   await ensureCsrfToken();
+  socket.connect();
   dropZone.addEventListener("click", () => fileInput.click());
   dropZone.addEventListener("dragover", (event) => {
     event.preventDefault();
@@ -364,4 +365,4 @@ const init = async () => {
   setStatus("Connected. Waiting for updates...");
 };
 
-init();
+init().catch(error => setStatus(error.message, "error"));

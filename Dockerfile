@@ -1,18 +1,11 @@
-FROM node:lts
+FROM node:24-bookworm-slim
 
 WORKDIR /app
-
 COPY package*.json ./
-
-RUN npm install --omit=dev
-
-COPY . .
-
-RUN mkdir -p /app/data && chown -R node:node /app
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+COPY --chown=node:node . .
 
 USER node
-
 ENV NODE_ENV=production
 EXPOSE 3000
-
-CMD ["npm", "start"]
+CMD ["node", "src/server.js"]

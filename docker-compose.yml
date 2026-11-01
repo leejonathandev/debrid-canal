@@ -2,15 +2,17 @@ services:
   debrid-canal:
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-owner}/debrid-canal:latest
     build: .
-    ports:
-      - "3000:3000"
+    # Join this service to your existing Traefik network in your deployment.
+    # No host port is published: TinyAuth/Traefik is the access boundary.
+    expose:
+      - "3000"
     environment:
-      - REALDEBRID_API_KEY=${REALDEBRID_API_KEY}
-      - PORT=3000
-      - SESSION_SECRET=${SESSION_SECRET}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - AUTH_USER_HEADER=${AUTH_USER_HEADER:-}
-      - TRUST_PROXY=${TRUST_PROXY:-1}
-    volumes:
-      - ./data:/app/data
+      REALDEBRID_API_KEY: ${REALDEBRID_API_KEY:?Set REALDEBRID_API_KEY}
+      SESSION_SECRET: ${SESSION_SECRET:?Generate SESSION_SECRET with openssl rand -hex 32}
+      NODE_ENV: production
+      PORT: 3000
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RATE_LIMIT_API: ${RATE_LIMIT_API:-300}
+      RATE_LIMIT_CSRF: ${RATE_LIMIT_CSRF:-30}
     restart: unless-stopped

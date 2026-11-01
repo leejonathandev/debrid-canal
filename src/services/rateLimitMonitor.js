@@ -1,93 +1,64 @@
-/**
- * Rate Limit Monitor Service
- * Tracks API requests to Real-Debrid and enforces rate limits
- * - Limits: 250 requests per minute
- * - On HTTP 429: blocks requests for 60 seconds
- */
-
-import logger from '../utils/logger.js';
-
-class RateLimitMonitor {
-  constructor() {
+// One budget for every Real-Debrid operation, including failed requests.
+export class RateLimitMonitor {
+  constructor({ maxRequestsPerMinute = 250, concurrency = 4, maxQueue = 64, now = Date.now } = {}) {
+    this.maxRequestsPerMinute = maxRequestsPerMinute;
+    this.concurrency = concurrency;
+    this.maxQueue = maxQueue;
+    this.now = now;
     this.requestsPerMinute = [];
-    this.rateLimitHit = false;
-    this.rateLimitUntil = null;
-    this.maxRequestsPerMinute = 250;
-    this.rateLimitCooldownMs = 60000; // 60 seconds
+    this.rateLimitUntil = 0;
+    this.active = 0;
+    this.queue = [];
   }
 
-  /**
-   * Check if we can make an API request
-   * @returns {boolean} true if request is allowed, false otherwise
-   */
-  canMakeRequest() {
-    // If rate limit was hit, check if cooldown period has elapsed
-    if (this.rateLimitHit) {
-      const now = Date.now();
-      if (now < this.rateLimitUntil) {
-        return false;
-      }
-      // Cooldown period has elapsed, reset rate limit flag
-      this.rateLimitHit = false;
-      this.rateLimitUntil = null;
-      logger.info('[RateLimitMonitor] Rate limit cooldown complete, resuming API requests');
-    }
-
-    // Clean up old requests (older than 1 minute)
-    const oneMinuteAgo = Date.now() - 60000;
-    this.requestsPerMinute = this.requestsPerMinute.filter(timestamp => timestamp > oneMinuteAgo);
-
-    // Check if we're under the limit
-    return this.requestsPerMinute.length < this.maxRequestsPerMinute;
-  }
-
-  /**
-   * Record a successful API request
-   */
-  recordRequest() {
-    this.requestsPerMinute.push(Date.now());
-  }
-
-  /**
-   * Mark that HTTP 429 rate limit error was encountered
-   * Blocks all requests for 60 seconds
-   */
-  markRateLimitHit() {
-    this.rateLimitHit = true;
-    this.rateLimitUntil = Date.now() + this.rateLimitCooldownMs;
-    logger.warn(`[RateLimitMonitor] HTTP 429 detected - blocking requests until ${new Date(this.rateLimitUntil).toISOString()}`);
-  }
-
-  /**
-   * Get time remaining until rate limit cooldown ends
-   * @returns {number} milliseconds remaining, or 0 if not rate limited
-   */
-  getTimeUntilReset() {
-    if (!this.rateLimitHit || !this.rateLimitUntil) {
-      return 0;
-    }
-    const remaining = this.rateLimitUntil - Date.now();
-    return Math.max(0, remaining);
-  }
-
-  /**
-   * Check if currently rate limited
-   * @returns {boolean}
-   */
-  isRateLimited() {
-    return this.rateLimitHit && this.getTimeUntilReset() > 0;
-  }
-
-  /**
-   * Get current request count in the last minute
-   * @returns {number}
-   */
   getCurrentRequestCount() {
-    const oneMinuteAgo = Date.now() - 60000;
-    this.requestsPerMinute = this.requestsPerMinute.filter(timestamp => timestamp > oneMinuteAgo);
+    this.requestsPerMinute = this.requestsPerMinute.filter(time => time > this.now() - 60000);
     return this.requestsPerMinute.length;
+  }
+
+  getTimeUntilReset() {
+    const budgetReset = this.getCurrentRequestCount() >= this.maxRequestsPerMinute
+      ? this.requestsPerMinute[0] + 60000 : 0;
+    return Math.max(0, this.rateLimitUntil - this.now(), budgetReset - this.now());
+  }
+
+  isRateLimited() { return this.getTimeUntilReset() > 0; }
+  canMakeRequest() { return !this.isRateLimited(); }
+  recordRequest() { this.requestsPerMinute.push(this.now()); }
+
+  markRateLimitHit(retryAfter) {
+    const seconds = Number(retryAfter);
+    const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - this.now();
+    this.rateLimitUntil = Math.max(this.rateLimitUntil, this.now() + Math.max(60000, delay || 0));
+  }
+
+  run(task) {
+    if (this.queue.length >= this.maxQueue) {
+      return Promise.reject(Object.assign(new Error("Upstream request queue is full."), { status: 503 }));
+    }
+    return new Promise((resolve, reject) => {
+      this.queue.push({ task, resolve, reject });
+      this.drain();
+    });
+  }
+
+  drain() {
+    while (this.active < this.concurrency && this.queue.length) {
+      const { task, resolve, reject } = this.queue.shift();
+      if (!this.canMakeRequest()) {
+        reject(Object.assign(new Error("Real-Debrid request limit reached. Please try again later."), {
+          status: 429, isRateLimit: true, retryAfter: Math.ceil(this.getTimeUntilReset() / 1000)
+        }));
+        continue;
+      }
+      this.recordRequest();
+      this.active++;
+      Promise.resolve().then(task).then(resolve, reject).finally(() => {
+        this.active--;
+        this.drain();
+      });
+    }
   }
 }
 
-// Export singleton instance
 export default new RateLimitMonitor();
