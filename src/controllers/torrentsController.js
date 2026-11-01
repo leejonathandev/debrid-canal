@@ -1,214 +1,85 @@
-import {
-  addMagnetToRealDebrid,
-  addTorrentToRealDebrid,
-  deleteDownload,
-  deleteTorrent,
-  refreshTorrentInfo
-} from "../services/realdebrid.js";
-import pollingService from "../services/pollingService.js";
 import logger from "../utils/logger.js";
 
-const isMagnetLink = (value) =>
-  typeof value === "string" && value.trim().toLowerCase().startsWith("magnet:");
+const notFound = () => Object.assign(new Error("Torrent not found."), { status: 404 });
+const isMagnetLink = value => typeof value === "string" && Buffer.byteLength(value.trim()) <= 8192 &&
+  /^magnet:\?/i.test(value.trim()) && new URLSearchParams(value.trim().slice(8)).has("xt");
 
-const findTorrent = (req, id) =>
-  req.session.torrents.find((torrent) => torrent.id === id);
+export function createTorrentsController({ service, sessions, poller }) {
+  const add = async (req, res, inputType, operation) => {
+    let torrent;
+    await sessions.mutate(req.sessionID, async torrents => {
+      const result = await operation();
+      torrent = {
+        ...result, inputType, addedAt: new Date().toISOString(), error: null
+      };
+      // Some magnets resolve to an existing account torrent ID.
+      return [torrent, ...torrents.filter(item => item.id !== torrent.id)];
+    });
+    void poller.triggerImmediatePoll();
+    res.status(201).json(torrent);
+  };
 
-const emitSessionUpdate = (req) => {
-  if (!req.io || !req.session) {
-    return;
-  }
-
-  const torrents = req.session.torrents || [];
-  const allComplete = torrents.every(
-    (torrent) => torrent.status === "downloaded" && torrent.progress === 100
-  );
-
-  const sessionId = req.sessionID;
-
-  req.io.to(sessionId).emit("torrents-updated", {
-    torrents,
-    allComplete
-  });
-};
-
-export const addMagnet = async (req, res) => {
-  const { magnet } = req.body;
-
-  if (!isMagnetLink(magnet)) {
-    return res.status(400).json({ error: "Invalid magnet link." });
-  }
-
-  try {
-    const result = await addMagnetToRealDebrid(magnet.trim());
-    const torrent = {
-      id: result.id,
-      inputType: "magnet",
-      name: result.name || "Magnet",
-      status: result.status || "queued",
-      progress: result.progress ?? 0,
-      addedAt: new Date().toISOString(),
-      unrestrictedLink: result.unrestrictedLink || null,
-      unrestrictedLinks: result.unrestrictedLinks || [],
-      error: null
-    };
-
-    req.session.torrents.unshift(torrent);
-
-    req.session.save((err) => {
-      if (err) {
-        logger.error("[Controller] Error saving session:", err);
+  return {
+    addMagnet: async (req, res) => {
+      if (!isMagnetLink(req.body?.magnet)) return res.status(400).json({ error: "Invalid magnet link (maximum 8 KB)." });
+      await add(req, res, "magnet", () => service.addMagnetToRealDebrid(req.body.magnet.trim()));
+    },
+    addTorrentFile: async (req, res) => {
+      if (!req.file) return res.status(400).json({ error: "Torrent file is required." });
+      await add(req, res, "torrent", () => service.addTorrentToRealDebrid(req.file));
+    },
+    listTorrents: async (req, res) => {
+      if (req.query.refresh === "1" || req.query.refresh === "true") {
+        await sessions.mutate(req.sessionID, async torrents => {
+          const updated = [];
+          for (const torrent of torrents) {
+            try { updated.push(await service.refreshTorrentInfo(torrent)); }
+            catch {
+              // Commit successful links even if another torrent is unavailable.
+              updated.push({ ...torrent, error: "Update failed; retrying." });
+            }
+          }
+          return updated;
+        });
+        void poller.triggerImmediatePoll();
       }
-      emitSessionUpdate(req);
-    });
-
-    // Trigger polling service to start/refresh polling
-    pollingService.triggerImmediatePoll();
-
-    return res.status(201).json(torrent);
-  } catch (error) {
-    logger.error('[Controller] Error adding magnet:', {
-      message: error.message,
-      status: error.status,
-      isRateLimit: error.isRateLimit,
-      response: error.response?.data,
-      stack: error.stack
-    });
-    return res.status(500).json({ error: error.message || "Failed to add magnet." });
-  }
-};
-
-export const addTorrentFile = async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "Torrent file is required." });
-  }
-
-  try {
-    const result = await addTorrentToRealDebrid(req.file);
-    const torrent = {
-      id: result.id,
-      inputType: "torrent",
-      name: result.name || req.file.originalname,
-      status: result.status || "queued",
-      progress: result.progress ?? 0,
-      addedAt: new Date().toISOString(),
-      unrestrictedLink: result.unrestrictedLink || null,
-      unrestrictedLinks: result.unrestrictedLinks || [],
-      error: null
-    };
-
-    req.session.torrents.unshift(torrent);
-
-    req.session.save((err) => {
-      if (err) {
-        logger.error("[Controller] Error saving session:", err);
-      }
-      emitSessionUpdate(req);
-    });
-
-    // Trigger polling service to start/refresh polling
-    pollingService.triggerImmediatePoll();
-
-    return res.status(201).json(torrent);
-  } catch (error) {
-    logger.error('[Controller] Error uploading torrent file:', {
-      message: error.message,
-      status: error.status,
-      isRateLimit: error.isRateLimit,
-      response: error.response?.data,
-      stack: error.stack
-    });
-    return res
-      .status(500)
-      .json({ error: error.message || "Failed to upload torrent." });
-  }
-};
-
-export const listTorrents = async (req, res) => {
-  const refresh = req.query.refresh === "1" || req.query.refresh === "true";
-  const torrents = req.session.torrents || [];
-
-  if (!refresh) {
-    return res.json(torrents);
-  }
-
-  try {
-    const refreshed = [];
-
-    for (const torrent of torrents) {
-      const updated = await refreshTorrentInfo(torrent);
-      refreshed.push(updated);
-    }
-
-    req.session.torrents = refreshed;
-    return res.json(refreshed);
-  } catch (error) {
-    logger.error('[Controller] Error refreshing torrents:', {
-      message: error.message,
-      status: error.status,
-      isRateLimit: error.isRateLimit,
-      response: error.response?.data,
-      stack: error.stack
-    });
-    return res
-      .status(500)
-      .json({ error: error.message || "Failed to refresh torrents." });
-  }
-};
-
-export const refreshTorrent = async (req, res) => {
-  const { id } = req.params;
-  const torrent = findTorrent(req, id);
-
-  if (!torrent) {
-    return res.status(404).json({ error: "Torrent not found." });
-  }
-
-  try {
-    const updated = await refreshTorrentInfo(torrent);
-    req.session.torrents = req.session.torrents.map((item) =>
-      item.id === id ? updated : item
-    );
-
-    return res.json(updated);
-  } catch (error) {
-    return res
-      .status(500)
-      .json({ error: error.message || "Failed to refresh torrent." });
-  }
-};
-
-export const cancelTorrent = async (req, res) => {
-  const { id } = req.params;
-  const torrent = findTorrent(req, id);
-
-  if (!torrent) {
-    return res.status(404).json({ error: "Torrent not found." });
-  }
-
-  req.session.torrents = req.session.torrents.filter((item) => item.id !== id);
-
-  req.session.save((saveError) => {
-    if (saveError) {
-      logger.error("[Controller] Error saving session after cancel:", saveError);
-      return res.status(500).json({ error: "Failed to cancel torrent." });
-    }
-
-    emitSessionUpdate(req);
-    res.status(204).send();
-
-    void (async () => {
-      try {
-        await deleteTorrent(id);
-        if (torrent.downloadId) {
-          await deleteDownload(torrent.downloadId);
+      res.json(await sessions.read(req.sessionID));
+    },
+    refreshTorrent: async (req, res) => {
+      let updated;
+      await sessions.mutate(req.sessionID, async torrents => {
+        const torrent = torrents.find(item => item.id === req.params.id);
+        if (!torrent) throw notFound();
+        updated = await service.refreshTorrentInfo(torrent);
+        return torrents.map(item => item.id === updated.id ? updated : item);
+      });
+      void poller.triggerImmediatePoll();
+      res.json(updated);
+    },
+    cancelTorrent: async (req, res) => {
+      await sessions.mutate(req.sessionID, async torrents => {
+        const torrent = torrents.find(item => item.id === req.params.id);
+        if (!torrent) throw notFound();
+        // Delete while holding the same lock as refresh, so no newly generated
+        // download IDs can escape cleanup. Failures leave the item retryable.
+        try { await service.deleteTorrent(torrent.id); }
+        catch (error) { if (error.response?.status !== 404) throw error; }
+        const downloadIds = new Set([
+          torrent.downloadId,
+          ...(torrent.unrestrictedLinks || []).map(link => link.downloadId)
+        ].filter(Boolean));
+        for (const id of downloadIds) {
+          try { await service.deleteDownload(id); }
+          catch (error) {
+            if (error.response?.status !== 404) {
+              logger.warn("[Controller] Download cleanup failed; removal can be retried.");
+              throw error;
+            }
+          }
         }
-      } catch (error) {
-        logger.warn(
-          `[Controller] Session torrent removed but Real-Debrid cleanup failed for id ${id}: ${error.message}`
-        );
-      }
-    })();
-
-  });
-};
+        return torrents.filter(item => item.id !== torrent.id);
+      });
+      res.status(204).end();
+    }
+  };
+}
