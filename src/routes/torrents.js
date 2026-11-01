@@ -1,25 +1,24 @@
 import { Router } from "express";
 import multer from "multer";
-import {
-  addMagnet,
-  addTorrentFile,
-  cancelTorrent,
-  listTorrents,
-  refreshTorrent
-} from "../controllers/torrentsController.js";
+import { createTorrentsController } from "../controllers/torrentsController.js";
 
-const router = Router();
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 50 * 1024 * 1024
-  }
-});
-
-router.get("/", listTorrents);
-router.delete("/:id", cancelTorrent);
-router.post("/:id/refresh", refreshTorrent);
-router.post("/magnet", addMagnet);
-router.post("/upload", upload.single("torrent"), addTorrentFile);
-
-export default router;
+export function createTorrentsRouter(dependencies) {
+  const router = Router();
+  const controller = createTorrentsController(dependencies);
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024, files: 1, fields: 4, parts: 5 },
+    fileFilter: (_req, file, cb) => {
+      if (!file.originalname.toLowerCase().endsWith(".torrent")) {
+        return cb(Object.assign(new Error("Only .torrent files are accepted."), { status: 400 }));
+      }
+      cb(null, true);
+    }
+  });
+  router.get("/", controller.listTorrents);
+  router.delete("/:id", controller.cancelTorrent);
+  router.post("/:id/refresh", controller.refreshTorrent);
+  router.post("/magnet", controller.addMagnet);
+  router.post("/upload", upload.single("torrent"), controller.addTorrentFile);
+  return router;
+}

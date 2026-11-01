@@ -1,283 +1,128 @@
 import axios from "axios";
-import dotenv from "dotenv";
 import rateLimitMonitor from "./rateLimitMonitor.js";
 import logger from "../utils/logger.js";
 
-dotenv.config();
-
 const API_BASE = "https://api.real-debrid.com/rest/1.0";
-const API_KEY = process.env.REALDEBRID_API_KEY;
-const isDebug = logger.isDebug();
-
-if (!API_KEY) {
-  logger.warn("REALDEBRID_API_KEY is not set. API calls will fail.");
-}
-
-const client = axios.create({
-  baseURL: API_BASE,
-  headers: {
-    Authorization: `Bearer ${API_KEY}`
-  },
-  timeout: 30000
+const safeId = value => encodeURIComponent(String(value || "").trim());
+const fileName = (filePath, fallback) => typeof filePath === "string"
+  ? filePath.split("/").filter(Boolean).at(-1) || fallback : fallback;
+const normalize = info => ({
+  id: info.id,
+  name: info.filename,
+  status: info.status,
+  progress: Number(info.progress || 0),
+  links: Array.isArray(info.links) ? info.links : [],
+  ...(Array.isArray(info.files) ? { files: info.files } : {})
 });
 
-// Add response interceptor to handle rate limiting and log status codes
-client.interceptors.response.use(
-  (response) => {
-    const method = response.config?.method?.toUpperCase() || 'REQUEST';
-    const url = response.config?.url || '';
-    logger.info(`[RealDebrid API] ${method} ${url} -> ${response.status}`);
-    
-    if (isDebug) {
-      logger.debug(`[RealDebrid API DEBUG] Full response for ${url}:`);
-      if (Array.isArray(response.data)) {
-        logger.debug(`[RealDebrid API DEBUG] Array with ${response.data.length} items:`);
-        response.data.forEach((item, index) => {
-          logger.debug(`[RealDebrid API DEBUG] Item ${index}:`, JSON.stringify(item, null, 2));
+export function createRealDebridService({ apiKey = process.env.REALDEBRID_API_KEY, adapter, monitor = rateLimitMonitor } = {}) {
+  const client = axios.create({
+    baseURL: API_BASE,
+    headers: { Authorization: `Bearer ${apiKey}` },
+    timeout: 30000,
+    ...(adapter ? { adapter } : {})
+  });
+
+  const request = config => monitor.run(async () => {
+    try {
+      const response = await client.request(config);
+      // Never log bodies, authorization headers, source links or download URLs.
+      logger.debug(`[RealDebrid] ${config.method} ${config.url.split("?")[0]} -> ${response.status}`);
+      return response;
+    } catch (error) {
+      if (error.response?.status === 429) {
+        monitor.markRateLimitHit(error.response.headers?.["retry-after"]);
+        throw Object.assign(new Error("Real-Debrid request limit reached. Please try again later."), {
+          status: 429, isRateLimit: true, retryAfter: Math.ceil(monitor.getTimeUntilReset() / 1000)
         });
-      } else {
-        logger.debug(JSON.stringify(response.data, null, 2));
+      }
+      throw error;
+    }
+  });
+  const form = (url, values) => request({
+    method: "POST", url, data: new URLSearchParams(values),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" }
+  });
+
+  const getTorrentInfo = async id => normalize((await request({ method: "GET", url: `/torrents/info/${safeId(id)}` })).data);
+  const selectAllFiles = id => form(`/torrents/selectFiles/${safeId(id)}`, { files: "all" });
+  const unrestrict = async sourceLink => {
+    const response = await form("/unrestrict/link", { link: sourceLink });
+    if (!response.data?.download || !/^https?:\/\//i.test(response.data.download)) {
+      throw new Error("Real-Debrid did not return an HTTP download link.");
+    }
+    return { sourceLink, url: response.data.download, downloadId: response.data.id || null };
+  };
+
+  const getUnrestrictedLinks = async (links, files = [], existing = []) => {
+    // RD's links correspond to selected files, in file order.
+    const selected = files.filter(file => Number(file.selected) === 1);
+    const results = [];
+    let rateLimited = false;
+    // Sequential per torrent; the shared monitor bounds cross-session concurrency.
+    for (const [index, sourceLink] of links.entries()) {
+      const cached = existing.find(item => item.sourceLink === sourceLink && item.url);
+      if (cached) { results.push(cached); continue; }
+      if (rateLimited) continue;
+      try {
+        results.push({ ...await unrestrict(sourceLink), name: fileName(selected[index]?.path, `File ${index + 1}`) });
+      } catch (error) {
+        logger.warn("[RealDebrid] Download link unavailable; will retry.");
+        if (error.isRateLimit) rateLimited = true;
       }
     }
-    
-    return response;
-  },
-  (error) => {
-    const status = error.response?.status;
-    const method = error.config?.method?.toUpperCase() || 'REQUEST';
-    const url = error.config?.url || '';
-    if (status) {
-      logger.warn(`[RealDebrid API] ${method} ${url} -> ${status}`);
-    }
-
-    // Check for HTTP 429 rate limit error
-    if (status === 429) {
-      logger.error('[RealDebrid] HTTP 429 - Rate limit exceeded');
-      rateLimitMonitor.markRateLimitHit();
-      
-      // Create a more informative error
-      const rateLimitError = new Error('Rate limit exceeded. Please wait before making more requests.');
-      rateLimitError.isRateLimit = true;
-      rateLimitError.status = 429;
-      throw rateLimitError;
-    }
-    
-    throw error;
-  }
-);
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const getFileName = (filePath, fallback) => {
-  if (typeof filePath !== "string" || !filePath.trim()) {
-    return fallback;
-  }
-
-  const segments = filePath.split("/").filter(Boolean);
-  return segments[segments.length - 1] || fallback;
-};
-
-const normalizeInfo = (info) => {
-  return {
-    id: info.id,
-    name: info.filename,
-    status: info.status,
-    progress: Number(info.progress || 0),
-    links: Array.isArray(info.links) ? info.links : [],
-    files: Array.isArray(info.files) ? info.files : []
+    return results;
   };
-};
 
-const normalizeListItem = (item) => {
-  const normalized = {
-    id: item.id,
-    name: item.filename,
-    status: item.status,
-    progress: Number(item.progress || 0),
-    links: Array.isArray(item.links) ? item.links : []
-  };
-  
-  if (isDebug) {
-    logger.debug(
-      `[RealDebrid DEBUG] Normalized torrent ${item.id} (hash=${item.hash}): status=${normalized.status}, progress=${normalized.progress}`
-    );
-  }
-  
-  return normalized;
-};
-
-export const listTorrents = async ({ limit = 10 } = {}) => {
-  const params = new URLSearchParams({
-    limit: String(limit)
-  });
-
-  const response = await client.get(`/torrents?${params.toString()}`);
-
-  // HTTP 204 (No Content) or empty response means no torrents
-  if (response.status === 204 || !response.data) {
-    if (isDebug) {
-      logger.debug('[RealDebrid DEBUG] No torrents found (204 or empty response)');
+  const refreshTorrentInfo = async (torrent, listed) => {
+    let info = listed || await getTorrentInfo(torrent.id);
+    let unrestrictedLinks = torrent.unrestrictedLinks || [];
+    let linksPending = true;
+    if (info.status === "waiting_files_selection") {
+      // Retry selection on every cycle until the upstream state changes.
+      await selectAllFiles(torrent.id);
     }
-    return [];
-  }
-
-  if (!Array.isArray(response.data)) {
-    if (isDebug) {
-      logger.debug('[RealDebrid DEBUG] Response data is not an array:', typeof response.data);
-    }
-    return [];
-  }
-
-  return response.data.map(normalizeListItem);
-};
-
-export const addTorrentToRealDebrid = async (file) => {
-  // Real-Debrid expects raw binary data, not FormData
-  const response = await client.put("/torrents/addTorrent", file.buffer, {
-    headers: {
-      'Content-Type': 'application/x-bittorrent'
-    }
-  });
-
-  const torrentId = response.data?.id;
-  if (!torrentId) {
-    throw new Error("RealDebrid did not return a torrent id.");
-  }
-
-  await sleep(1000);
-  await selectAllFiles(torrentId);
-  await sleep(1000);
-
-  const recent = await listTorrents({ limit: 10 });
-  const listItem = recent.find((item) => item.id === torrentId);
-
-  return {
-    id: torrentId,
-    name: listItem?.name || file.originalname,
-    status: listItem?.status || "queued",
-    progress: listItem?.progress ?? 0,
-    unrestrictedLink: null,
-    unrestrictedLinks: []
-  };
-};
-
-export const addMagnetToRealDebrid = async (magnet) => {
-  const params = new URLSearchParams({ magnet });
-
-  const response = await client.post("/torrents/addMagnet", params, {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    }
-  });
-
-  const torrentId = response.data?.id;
-  if (!torrentId) {
-    throw new Error("RealDebrid did not return a torrent id.");
-  }
-
-  await sleep(1000);
-  await selectAllFiles(torrentId);
-  await sleep(1000);
-
-  const recent = await listTorrents({ limit: 10 });
-  const listItem = recent.find((item) => item.id === torrentId);
-
-  return {
-    id: torrentId,
-    name: listItem?.name || "Magnet",
-    status: listItem?.status || "queued",
-    progress: listItem?.progress ?? 0,
-    unrestrictedLink: null,
-    unrestrictedLinks: []
-  };
-};
-
-export const getTorrentInfo = async (torrentId) => {
-  const response = await client.get(`/torrents/info/${torrentId}`);
-  return normalizeInfo(response.data);
-};
-
-export const selectAllFiles = async (torrentId) => {
-  const params = new URLSearchParams({ files: "all" });
-
-  await client.post(`/torrents/selectFiles/${torrentId}`, params, {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    }
-  });
-};
-
-export const getUnrestrictedLink = async (link) => {
-  const params = new URLSearchParams({ link });
-  const response = await client.post("/unrestrict/link", params, {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    }
-  });
-
-  return response.data?.download || null;
-};
-
-const sanitizeResourceId = (value) => encodeURIComponent(String(value || "").trim());
-
-export const deleteTorrent = async (torrentId) => {
-  const safeId = sanitizeResourceId(torrentId);
-  const response = await client.delete(`/torrents/delete/${safeId}`);
-  return response.status === 204;
-};
-
-export const deleteDownload = async (downloadId) => {
-  const safeId = sanitizeResourceId(downloadId);
-  const response = await client.delete(`/downloads/delete/${safeId}`);
-  return response.status === 204;
-};
-
-export const getUnrestrictedLinks = async (links, files = []) => {
-  if (!Array.isArray(links) || links.length === 0) {
-    return [];
-  }
-
-  const unresolved = await Promise.allSettled(
-    links.map((sourceLink) => getUnrestrictedLink(sourceLink))
-  );
-
-  return unresolved.flatMap((result, index) => {
-    if (result.status !== "fulfilled" || !result.value) {
-      return [];
-    }
-
-    return [
-      {
-        name: getFileName(files[index]?.path, `File ${index + 1}`),
-        url: result.value
-      }
-    ];
-  });
-};
-
-export const refreshTorrentInfo = async (torrent) => {
-  const info = await getTorrentInfo(torrent.id);
-
-  let unrestrictedLink = torrent.unrestrictedLink || null;
-  let unrestrictedLinks = Array.isArray(torrent.unrestrictedLinks)
-    ? torrent.unrestrictedLinks
-    : [];
-
-  if (!unrestrictedLinks.length && info.links.length) {
     if (info.status === "downloaded") {
-      unrestrictedLinks = await getUnrestrictedLinks(info.links, info.files);
+      if (!info.files) info = await getTorrentInfo(torrent.id);
+      unrestrictedLinks = await getUnrestrictedLinks(info.links, info.files, unrestrictedLinks);
+      linksPending = !info.links.length || info.links.some(link => !unrestrictedLinks.some(item => item.sourceLink === link));
     }
-  }
+    return {
+      ...torrent,
+      name: info.name || torrent.name,
+      status: info.status,
+      progress: info.progress,
+      unrestrictedLink: unrestrictedLinks[0]?.url || torrent.unrestrictedLink || null,
+      unrestrictedLinks,
+      linksPending,
+      error: linksPending && info.status === "downloaded" ? "Waiting for remaining download links; retrying." : null
+    };
+  };
 
-  if (!unrestrictedLink && unrestrictedLinks.length) {
-    unrestrictedLink = unrestrictedLinks[0].url;
-  }
+  const added = (response, name) => {
+    const id = response.data?.id;
+    if (!id) throw new Error("Real-Debrid did not return a torrent id.");
+    // Persist the ID immediately. File selection/metadata may not be ready yet;
+    // the poller owns those retries, so a later failure cannot orphan this ID.
+    return { id, name, status: "queued", progress: 0, unrestrictedLink: null, unrestrictedLinks: [], linksPending: true };
+  };
 
   return {
-    ...torrent,
-    name: info.name || torrent.name,
-    status: info.status,
-    progress: info.progress,
-    unrestrictedLink,
-    unrestrictedLinks
+    listTorrents: async ({ limit = 10 } = {}) => {
+      const response = await request({ method: "GET", url: `/torrents?limit=${Math.min(5000, Math.max(1, limit))}` });
+      return Array.isArray(response.data) ? response.data.map(normalize) : [];
+    },
+    addMagnetToRealDebrid: async magnet => added(await form("/torrents/addMagnet", { magnet }), "Magnet"),
+    addTorrentToRealDebrid: async file => added(await request({
+      method: "PUT", url: "/torrents/addTorrent", data: file.buffer,
+      headers: { "Content-Type": "application/x-bittorrent" }
+    }), file.originalname),
+    getTorrentInfo,
+    selectAllFiles,
+    getUnrestrictedLink: async link => (await unrestrict(link)).url,
+    getUnrestrictedLinks,
+    refreshTorrentInfo,
+    deleteTorrent: async id => (await request({ method: "DELETE", url: `/torrents/delete/${safeId(id)}` })).status === 204,
+    deleteDownload: async id => (await request({ method: "DELETE", url: `/downloads/delete/${safeId(id)}` })).status === 204
   };
-};
+}
