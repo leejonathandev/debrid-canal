@@ -16,6 +16,8 @@ export function createTorrentsRouter(dependencies) {
     }
   });
   router.get("/", controller.listTorrents);
+  router.get("/state", controller.getState);
+  router.post("/refresh", controller.refreshTorrents);
   router.delete("/:id", controller.cancelTorrent);
   router.post("/:id/refresh", controller.refreshTorrent);
   router.post("/magnet", controller.addMagnet);

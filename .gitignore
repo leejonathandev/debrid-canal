@@ -17,6 +17,9 @@ logs/
 *.log
 
 # Runtime data
+data/
+*.sqlite
+*.sqlite-*
 pids/
 *.pid
 *.seed

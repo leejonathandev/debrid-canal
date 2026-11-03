@@ -1,3 +1,5 @@
+import { createSessionClient } from "./session-client.js";
+
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
 const statusEl = document.getElementById("status");
@@ -9,22 +11,6 @@ const rateLimitCountdown = document.getElementById("rate-limit-countdown");
 
 // Initialize Socket.IO connection
 const socket = io({ autoConnect: false });
-let csrfToken = "";
-
-const ensureCsrfToken = async () => {
-  if (csrfToken) {
-    return csrfToken;
-  }
-
-  const response = await fetch("/api/csrf-token");
-  if (!response.ok) {
-    throw new Error("Failed to fetch CSRF token.");
-  }
-
-  const data = await response.json();
-  csrfToken = data.csrfToken;
-  return csrfToken;
-};
 
 const setStatus = (message, type = "info") => {
   statusEl.textContent = message;
@@ -60,58 +46,23 @@ const renderDownloadLinks = (torrent) => {
 };
 
 const uploadTorrent = async (file) => {
-  const token = await ensureCsrfToken();
   const form = new FormData();
   form.append("torrent", file, file.name);
-
-  const response = await fetch("/api/torrents/upload", {
-    method: "POST",
-    headers: {
-      "CSRF-Token": token
-    },
-    body: form
-  });
-
-  if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.error || "Upload failed");
-  }
-
-  return response.json();
+  return client.mutate("/api/torrents/upload", { method: "POST", body: form });
 };
 
 const submitMagnet = async (magnet) => {
-  const token = await ensureCsrfToken();
-  const response = await fetch("/api/torrents/magnet", {
+  return client.mutate("/api/torrents/magnet", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "CSRF-Token": token
+      "Content-Type": "application/json"
     },
     body: JSON.stringify({ magnet })
   });
-
-  if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.error || "Magnet submission failed");
-  }
-
-  return response.json();
 };
 
 const cancelTorrent = async (torrentId) => {
-  const token = await ensureCsrfToken();
-  const response = await fetch(`/api/torrents/${encodeURIComponent(torrentId)}`, {
-    method: "DELETE",
-    headers: {
-      "CSRF-Token": token
-    }
-  });
-
-  if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.error || "Cancel failed");
-  }
+  return client.mutate(`/api/torrents/${encodeURIComponent(torrentId)}`, { method: "DELETE" });
 };
 
 const renderTorrents = (torrents) => {
@@ -164,7 +115,7 @@ const renderTorrents = (torrents) => {
         cancelButton.disabled = true;
         setStatus(isDownloaded ? "Removing finished download..." : "Cancelling torrent...");
         await cancelTorrent(torrent.id);
-        setStatus("Removed from list. Waiting for update...");
+        setStatus("Removed from list.");
       } catch (error) {
         cancelButton.disabled = false;
         setStatus(error.message, "error");
@@ -184,8 +135,7 @@ const handleDrop = async (event) => {
   try {
     if (files && files.length) {
       setStatus("Uploading torrent file...");
-      const torrent = await uploadTorrent(files[0]);
-      mergeTorrent(torrent);
+      await uploadTorrent(files[0]);
       setStatus("Torrent uploaded. Tracking status.");
       return;
     }
@@ -203,8 +153,7 @@ const handleDrop = async (event) => {
 
           try {
             setStatus("Submitting magnet link...");
-            const torrent = await submitMagnet(text.trim());
-            mergeTorrent(torrent);
+            await submitMagnet(text.trim());
             setStatus("Magnet submitted. Tracking status.");
           } catch (error) {
             setStatus(error.message, "error");
@@ -223,8 +172,7 @@ const handleFilePick = async (event) => {
 
   try {
     setStatus("Uploading torrent file...");
-    const torrent = await uploadTorrent(file);
-    mergeTorrent(torrent);
+    await uploadTorrent(file);
     setStatus("Torrent uploaded. Tracking status.");
   } catch (error) {
     setStatus(error.message, "error");
@@ -243,8 +191,7 @@ const handleMagnetSubmit = async () => {
   try {
     magnetSubmit.disabled = true;
     setStatus("Submitting magnet link...");
-    const torrent = await submitMagnet(magnet);
-    mergeTorrent(torrent);
+    await submitMagnet(magnet);
     magnetText.value = "";
     setStatus("Magnet submitted. Tracking status.");
   } catch (error) {
@@ -254,54 +201,12 @@ const handleMagnetSubmit = async () => {
   }
 };
 
-let currentTorrents = [];
-
-const mergeTorrent = (torrent) => {
-  if (!torrent || !torrent.id) {
-    return;
-  }
-
-  const index = currentTorrents.findIndex((item) => item.id === torrent.id);
-  if (index === -1) {
-    currentTorrents = [torrent, ...currentTorrents];
-  } else {
-    currentTorrents = currentTorrents.map((item, idx) =>
-      idx === index ? { ...item, ...torrent } : item
-    );
-  }
-
-  renderTorrents(currentTorrents);
-};
-
-// Socket.IO event handlers
-socket.on('connect', () => {
-  console.log('[Socket.IO] Connected');
-});
-
-socket.on('disconnect', () => {
-  console.log('[Socket.IO] Disconnected');
-});
-
-socket.on('torrents-updated', (data) => {
-  console.log('[Socket.IO] Received torrents-updated event');
-  console.log('[Socket.IO] Data received:', {
-    torrentsCount: data.torrents?.length,
-    allComplete: data.allComplete,
-    progressValues: data.torrents?.map(t => ({ id: t.id, progress: t.progress, status: t.status }))
-  });
-
-  currentTorrents = data.torrents || [];
-  renderTorrents(currentTorrents);
-
-  console.log('[Socket.IO] currentTorrents after update:', currentTorrents.map(t => ({
-    id: t.id,
-    name: t.name,
-    progress: t.progress,
-    status: t.status
-  })));
-  
-  if (data.allComplete) {
-    setStatus("All torrents downloaded.");
+const client = createSessionClient({
+  socket,
+  onStatus: setStatus,
+  onState: data => {
+    renderTorrents(data.torrents);
+    if (data.allComplete) setStatus("All torrents downloaded.");
   }
 });
 
@@ -333,8 +238,6 @@ socket.on('rate-limit-hit', (data) => {
 });
 
 const init = async () => {
-  await ensureCsrfToken();
-  socket.connect();
   dropZone.addEventListener("click", () => fileInput.click());
   dropZone.addEventListener("dragover", (event) => {
     event.preventDefault();
@@ -361,8 +264,10 @@ const init = async () => {
     }
   });
 
-  // Initial status
-  setStatus("Connected. Waiting for updates...");
+  // Register controls before bootstrap, so a failed initial connection can be
+  // retried by the next user action without leaving the interface inert.
+  setStatus("Connecting...");
+  await client.start();
 };
 
 init().catch(error => setStatus(error.message, "error"));
