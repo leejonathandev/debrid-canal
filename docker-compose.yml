@@ -10,9 +10,15 @@ services:
       REALDEBRID_API_KEY: ${REALDEBRID_API_KEY:?Set REALDEBRID_API_KEY}
       SESSION_SECRET: ${SESSION_SECRET:?Generate SESSION_SECRET with openssl rand -hex 32}
       NODE_ENV: production
+      DATA_DIR: /app/data
       PORT: 3000
       TRUST_PROXY: ${TRUST_PROXY:-1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RATE_LIMIT_API: ${RATE_LIMIT_API:-300}
       RATE_LIMIT_CSRF: ${RATE_LIMIT_CSRF:-30}
+    volumes:
+      - session-data:/app/data
     restart: unless-stopped
+
+volumes:
+  session-data:

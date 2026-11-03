@@ -13,6 +13,7 @@ export class PollingService {
     this.inFlight = null;
     this.isPolling = false;
     this.generation = 0;
+    this.closed = false;
   }
 
   initialize(io, sessionStore, sessions) {
@@ -22,7 +23,7 @@ export class PollingService {
   }
 
   start() {
-    if (this.isPolling) return;
+    if (this.closed || this.isPolling) return;
     this.isPolling = true;
     this.timer = setInterval(() => { void this.poll(); }, this.intervalMs);
     this.timer.unref?.();
@@ -35,17 +36,24 @@ export class PollingService {
   }
 
   triggerImmediatePoll() {
+    if (this.closed) return Promise.resolve();
     this.generation++;
     this.start();
     return this.poll();
   }
 
   poll() {
+    if (this.closed) return Promise.resolve();
     if (this.inFlight) return this.inFlight;
     this.inFlight = this.runCycle().catch(error => {
       logger.error("[PollingService] Poll failed:", error.message);
     }).finally(() => { this.inFlight = null; });
     return this.inFlight;
+  }
+
+  shutdown() {
+    this.closed = true;
+    this.stop();
   }
 
   async runCycle() {

@@ -5,6 +5,7 @@ import morgan from "morgan";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { Server } from "socket.io";
 import { doubleCsrf } from "csrf-csrf";
 import { rateLimit } from "express-rate-limit";
@@ -13,13 +14,14 @@ import { createTorrentsRouter } from "./routes/torrents.js";
 import { createRealDebridService } from "./services/realdebrid.js";
 import { PollingService } from "./services/pollingService.js";
 import { RateLimitMonitor } from "./services/rateLimitMonitor.js";
-import { SessionTorrents, callStore } from "./services/sessionTorrents.js";
-import { needsPolling } from "./services/torrentState.js";
+import { SessionTorrents, callStore, torrentSnapshot } from "./services/sessionTorrents.js";
+import { SqliteSessionStore } from "./services/sqliteSessionStore.js";
 import { resolveSessionSecret, positiveInteger, resolveTrustProxy } from "./config.js";
 import logger from "./utils/logger.js";
 
-export function createApplication({ env = process.env, service, monitor = new RateLimitMonitor(), sessionStore = new session.MemoryStore() } = {}) {
+export function createApplication({ env = process.env, service, monitor = new RateLimitMonitor(), sessionStore } = {}) {
   const secret = resolveSessionSecret(env);
+  sessionStore ||= new SqliteSessionStore({ directory: env.DATA_DIR || "./data" });
   service ||= createRealDebridService({ apiKey: env.REALDEBRID_API_KEY, monitor });
   const app = express();
   const httpServer = createServer(app);
@@ -27,6 +29,8 @@ export function createApplication({ env = process.env, service, monitor = new Ra
   const sessions = new SessionTorrents(sessionStore, io);
   const poller = new PollingService({ service, monitor });
   poller.initialize(io, sessionStore, sessions);
+  // Resume stored work even when no browser is connected after a restart.
+  httpServer.once("listening", () => { void poller.triggerImmediatePoll(); });
   app.disable("x-powered-by");
   app.set("trust proxy", resolveTrustProxy(env.TRUST_PROXY));
   // Paths are enough to diagnose requests; query strings may contain tokens.
@@ -64,11 +68,13 @@ export function createApplication({ env = process.env, service, monitor = new Ra
     // read-only, so Express's response-finalization cannot overwrite the queue.
     if (!req.session.createdAt) {
       req.session.createdAt = Date.now();
+      // Public ordering key, independent of the private signed session cookie.
+      req.session.stateKey = randomUUID();
       await new Promise((resolve, reject) => req.session.save(error => error ? reject(error) : resolve()));
     }
     next();
   });
-  const { doubleCsrfProtection, generateCsrfToken, validateRequest, invalidCsrfTokenError } = doubleCsrf({
+  const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
     getSecret: () => secret,
     getSessionIdentifier: req => req.sessionID,
     cookieName: "debrid_canal_csrf",
@@ -76,13 +82,10 @@ export function createApplication({ env = process.env, service, monitor = new Ra
     getCsrfTokenFromRequest: req => req.headers["csrf-token"],
     errorConfig: { statusCode: 403, message: "Invalid CSRF token", code: "EBADCSRFTOKEN" }
   });
-  app.get("/api/csrf-token", (req, res) => res.json({ csrfToken: generateCsrfToken(req, res) }));
-  app.use("/api/torrents", doubleCsrfProtection, (req, _res, next) => {
-    // The legacy GET refresh option creates upstream download links too.
-    const refresh = req.query.refresh === "1" || req.query.refresh === "true";
-    if (req.method === "GET" && refresh && !validateRequest(req)) return next(invalidCsrfTokenError);
-    next();
-  }, createTorrentsRouter({ service, sessions, poller }));
+  app.get("/api/csrf-token", async (req, res) => res.json({
+    csrfToken: generateCsrfToken(req, res), state: await sessions.snapshot(req.sessionID)
+  }));
+  app.use("/api/torrents", doubleCsrfProtection, createTorrentsRouter({ service, sessions, poller }));
   app.use("/api", (_req, res) => res.status(404).json({ error: "Not found." }));
   app.use((error, _req, res, next) => {
     if (res.headersSent) return next(error);
@@ -96,7 +99,7 @@ export function createApplication({ env = process.env, service, monitor = new Ra
     if (error.retryAfter) res.set("Retry-After", String(error.retryAfter));
     // Avoid logging axios errors: they contain the API key and submitted data.
     if (status >= 500) logger.error(`[HTTP] Request failed (${status}).`);
-    res.status(status).json({ error: message });
+    res.status(status).json({ error: message, ...(error.code === "EBADCSRFTOKEN" ? { code: error.code } : {}) });
   });
 
   // TinyAuth/Traefik must gate the complete /socket.io path, including upgrades.
@@ -104,7 +107,9 @@ export function createApplication({ env = process.env, service, monitor = new Ra
   io.use(async (socket, next) => {
     try {
       const stored = await callStore(sessionStore, "get", socket.request.sessionID);
-      if (!stored?.createdAt) return next(new Error("Session required. Reload the page."));
+      if (!stored?.createdAt) {
+        return next(Object.assign(new Error("Session required. Please reconnect."), { data: { code: "SESSION_REQUIRED" } }));
+      }
       next();
     } catch { next(new Error("Session unavailable.")); }
   });
@@ -116,25 +121,25 @@ export function createApplication({ env = process.env, service, monitor = new Ra
         const stored = await callStore(sessionStore, "get", id);
         if (!stored) { socket.disconnect(true); return; }
         socket.join(id);
-        const torrents = stored.torrents || [];
-        socket.emit("torrents-updated", {
-          torrents,
-          allComplete: torrents.length > 0 && torrents.every(t => t.status === "downloaded" && !needsPolling(t))
-        });
+        socket.emit("torrents-updated", torrentSnapshot(stored));
       });
     } catch { socket.disconnect(true); }
   });
-  // MemoryStore deletes expired entries when all() is called. This also prunes
-  // idle sessions when the poller has stopped, without extending their expiry.
+  // Prune idle sessions even when polling has stopped, without extending expiry.
   const cleanup = setInterval(() => {
     sessionStore.all(error => { if (error) logger.error("Session cleanup failed."); });
   }, 60 * 60 * 1000);
   cleanup.unref();
-  const close = async () => {
+  let closing;
+  const close = () => closing ||= (async () => {
     clearInterval(cleanup);
-    poller.stop();
-    await poller.inFlight;
+    poller.shutdown();
+    // Stop accepting requests, then drain requests and torrent writes before
+    // closing SQLite. A finishing upload must not restart the poller.
     await new Promise(resolve => io.close(resolve));
-  };
+    await poller.inFlight;
+    await Promise.allSettled([...sessions.locks.values()]);
+    if (sessionStore.close) await callStore(sessionStore, "close");
+  })();
   return { app, httpServer, io, sessions, sessionStore, poller, monitor, close };
 }

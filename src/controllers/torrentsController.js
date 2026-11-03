@@ -29,20 +29,23 @@ export function createTorrentsController({ service, sessions, poller }) {
       await add(req, res, "torrent", () => service.addTorrentToRealDebrid(req.file));
     },
     listTorrents: async (req, res) => {
-      if (req.query.refresh === "1" || req.query.refresh === "true") {
-        await sessions.mutate(req.sessionID, async torrents => {
-          const updated = [];
-          for (const torrent of torrents) {
-            try { updated.push(await service.refreshTorrentInfo(torrent)); }
-            catch {
-              // Commit successful links even if another torrent is unavailable.
-              updated.push({ ...torrent, error: "Update failed; retrying." });
-            }
+      // GET (including Express's implicit HEAD) never performs upstream writes.
+      res.json(await sessions.read(req.sessionID));
+    },
+    getState: async (req, res) => res.json(await sessions.snapshot(req.sessionID)),
+    refreshTorrents: async (req, res) => {
+      await sessions.mutate(req.sessionID, async torrents => {
+        const updated = [];
+        for (const torrent of torrents) {
+          try { updated.push(await service.refreshTorrentInfo(torrent)); }
+          catch {
+            // Commit successful links even if another torrent is unavailable.
+            updated.push({ ...torrent, error: "Update failed; retrying." });
           }
-          return updated;
-        });
-        void poller.triggerImmediatePoll();
-      }
+        }
+        return updated;
+      });
+      void poller.triggerImmediatePoll();
       res.json(await sessions.read(req.sessionID));
     },
     refreshTorrent: async (req, res) => {

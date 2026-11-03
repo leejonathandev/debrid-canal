@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
+import session from "express-session";
 import { io as connect } from "socket.io-client";
 import { createApplication } from "../src/app.js";
 import { createRealDebridService } from "../src/services/realdebrid.js";
@@ -19,7 +20,8 @@ function setup(t, overrides = {}) {
     deleteDownload: async id => { calls.push(`download:${id}`); },
     ...overrides.service
   };
-  const application = createApplication({ env: { NODE_ENV: "test", REALDEBRID_API_KEY: "fake", ...overrides.env }, service });
+  const application = createApplication({ env: { NODE_ENV: "test", REALDEBRID_API_KEY: "fake", ...overrides.env },
+    service, sessionStore: new session.MemoryStore() });
   // Controller tests explicitly control background work. Polling has its own suite.
   application.poller.triggerImmediatePoll = async () => {};
   t.after(() => application.close());
@@ -48,7 +50,7 @@ test("CSRF rejects missing, query-only and foreign-session tokens; valid upload/
   const { agent, httpServer, calls } = setup(t);
   const csrf = await token(agent);
   await agent.post("/api/torrents/magnet").send({ magnet }).expect(403);
-  await agent.get("/api/torrents?refresh=1").expect(403);
+  await agent.post("/api/torrents/refresh").expect(403);
   await agent.post(`/api/torrents/magnet?_csrf=${encodeURIComponent(csrf)}`).send({ magnet }).expect(403);
   await request(httpServer).post("/api/torrents/magnet").set("CSRF-Token", csrf).send({ magnet }).expect(403);
   await agent.post("/api/torrents/magnet").set("CSRF-Token", csrf).send({ magnet }).expect(201);
@@ -220,7 +222,7 @@ test("full application integration saves partial links, retries the remainder an
     }
     return { config, data, status: config.method === "delete" ? 204 : 200, headers: {} };
   } });
-  const app = createApplication({ env: { NODE_ENV: "test" }, service, monitor });
+  const app = createApplication({ env: { NODE_ENV: "test" }, service, monitor, sessionStore: new session.MemoryStore() });
   t.after(() => app.close());
   const agent = request.agent(app.httpServer);
   const csrf = await token(agent);
@@ -249,10 +251,50 @@ test("bulk refresh persists successful download metadata when another torrent fa
   const csrf = await token(agent);
   const id = Object.keys(await callStore(sessionStore, "all"))[0];
   await sessions.mutate(id, () => [{ id: "ok" }, { id: "fail" }]);
-  const response = await agent.get("/api/torrents?refresh=1").set("CSRF-Token", csrf).expect(200);
+  const response = await agent.post("/api/torrents/refresh").set("CSRF-Token", csrf).expect(200);
   assert.equal(response.body[0].unrestrictedLinks[0].downloadId, "keep");
   assert.match(response.body[1].error, /retrying/);
   assert.equal((await sessions.read(id))[0].unrestrictedLinks[0].downloadId, "keep");
+});
+
+test("GET and HEAD stay read-only even with legacy refresh flags; POST requires CSRF", async t => {
+  let refreshes = 0;
+  const { agent, sessionStore, sessions } = setup(t, { service: {
+    refreshTorrentInfo: async torrent => { refreshes++; return torrent; }
+  } });
+  const csrf = await token(agent);
+  const id = Object.keys(await callStore(sessionStore, "all"))[0];
+  await sessions.mutate(id, () => [{ id: "t", status: "queued" }]);
+  const before = await sessions.snapshot(id);
+  for (const flag of ["1", "true"]) {
+    await agent.get(`/api/torrents?refresh=${flag}`).expect(200);
+    await agent.head(`/api/torrents?refresh=${flag}`).expect(200);
+  }
+  await agent.post("/api/torrents/refresh").expect(403);
+  assert.equal(refreshes, 0);
+  assert.deepEqual(await sessions.snapshot(id), before);
+  await agent.post("/api/torrents/refresh").set("CSRF-Token", csrf).expect(200);
+  assert.equal(refreshes, 1);
+  const state = (await agent.get("/api/torrents/state").expect(200)).body;
+  assert.equal(state.revision, before.revision + 1);
+  assert.equal(state.sessionKey, before.sessionKey);
+});
+
+test("an expired session can bootstrap fresh CSRF and reconnect without reusing the old room", async t => {
+  const { agent, httpServer, sessionStore } = setup(t);
+  const url = await listen(httpServer);
+  const first = await agent.get("/api/csrf-token").expect(200);
+  await callStore(sessionStore, "clear");
+  const rejected = await agent.post("/api/torrents/magnet").set("CSRF-Token", first.body.csrfToken).send({ magnet }).expect(403);
+  assert.equal(rejected.body.code, "EBADCSRFTOKEN");
+  const renewed = await agent.get("/api/csrf-token").expect(200);
+  assert.notEqual(renewed.body.state.sessionKey, first.body.state.sessionKey);
+  await agent.post("/api/torrents/magnet").set("CSRF-Token", renewed.body.csrfToken).send({ magnet }).expect(201);
+  const cookie = renewed.headers["set-cookie"].map(value => value.split(";")[0]).join("; ");
+  const connected = await socketState(t, url, cookie);
+  assert.equal(connected.state.sessionKey, renewed.body.state.sessionKey);
+  assert.equal(connected.state.torrents[0].id, "magnet");
+  connected.socket.disconnect();
 });
 
 test("a malformed compressed request returns JSON and leaves the server healthy", async t => {
