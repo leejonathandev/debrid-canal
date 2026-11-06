@@ -4,7 +4,7 @@ A Node.js web interface for uploading torrent files or magnet links and retrievi
 
 ## Local setup
 
-Requires Node.js 24 or newer and an active [Real-Debrid API key](https://real-debrid.com/apitoken).
+Requires Node.js 26.13.0 (LTS) or newer and an active [Real-Debrid API key](https://real-debrid.com/apitoken).
 
 ```bash
 git clone https://github.com/leejonathandev/debrid-canal.git
@@ -25,7 +25,7 @@ The supported deployment uses Traefik for HTTPS and TinyAuth with OAuth for auth
 2. Attach the Compose service to your existing Traefik Docker network and configure your existing HTTPS router to send traffic to container port 3000. The included Compose file does **not** publish a host port. Do not add a publicly reachable port mapping.
 3. Apply your TinyAuth forward-auth middleware to the whole application router, including `/api/*` and `/socket.io/*`. Protect both Engine.IO polling requests and WebSocket upgrades. Do not create an unprotected Socket.IO router.
 4. Set `TRUST_PROXY` to the exact trusted proxy-hop count. A single Traefik hop uses `1`. Keep Traefik's forwarded-header trust restricted to your actual upstream proxies; browser-supplied forwarded headers must not be accepted as authoritative.
-5. Build and start with `docker compose up -d --build`. The image runs as the unprivileged `node` user on Node.js 24. Keep the `session-data:/app/data` volume and your `SESSION_SECRET` across container replacements.
+5. Build and start with `docker compose up -d --build`. The image runs as the unprivileged `node` user on Node.js 26 LTS. Keep the `session-data:/app/data` volume and your `SESSION_SECRET` across container replacements.
 
 For a prebuilt image, use `ghcr.io/leejonathandev/debrid-canal:latest` (the source repository's validated main pushes publish this image). Set `GITHUB_REPOSITORY_OWNER=leejonathandev` when using the included Compose file with that image, or substitute your own registry owner.
 
@@ -80,7 +80,7 @@ npm test
 npm audit --audit-level=low
 ```
 
-Tests use mocked Real-Debrid responses, local HTTP/WebSocket servers, and temporary SQLite databases; no real API key is needed. They cover restart/resume, durable cancellation metadata, expiry, concurrent cookie touches, read-only HEAD/GET requests, browser update ordering, and session recovery. CI tests Node.js 24 and 26, audits all dependencies, and builds the container on PRs. Publishing to GHCR occurs only after tests and audits pass on `main`.
+Tests use mocked Real-Debrid responses, local HTTP/WebSocket servers, and temporary SQLite databases. They cover restart/resume, durable cancellation metadata, expiry, concurrent cookie touches, read-only HEAD/GET requests, browser update ordering, and session recovery. CI tests the latest Node.js 26 release, audits all dependencies, and builds the container on PRs. Publishing to GHCR occurs only after tests and audits pass on `main`.
 
 ## License
 

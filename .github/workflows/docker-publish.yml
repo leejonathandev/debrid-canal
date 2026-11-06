@@ -12,14 +12,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: [24, 26]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node }}
+          node-version: "26"
+          check-latest: true
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm test
