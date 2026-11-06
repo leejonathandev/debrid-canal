@@ -1,9 +1,7 @@
 import session from "express-session";
-import * as sqlite from "node:sqlite";
+import { Database } from "node:sqlite";
 import { mkdirSync, openSync, closeSync, chmodSync } from "node:fs";
 import path from "node:path";
-
-const Database = sqlite.Database || sqlite.DatabaseSync;
 
 // A single app process owns this database. Cookie touches update only the cookie,
 // so finishing an older HTTP request cannot overwrite newer torrent state.
