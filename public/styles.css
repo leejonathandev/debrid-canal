@@ -1,8 +1,42 @@
 :root {
-  color-scheme: light;
+  color-scheme: dark;
+  --background: #0f172a;
+  --surface: #1e293b;
+  --text: #e2e8f0;
+  --secondary-text: #cbd5e1;
+  --muted-text: #94a3b8;
+  --surface-border: #334155;
+  --drop-zone-border: #64748b;
+  --input-border: #64748b;
+  --focus: #60a5fa;
+  --focus-shadow: rgba(96, 165, 250, 0.2);
+  --link: #93c5fd;
+  --warning-background: #3a2a16;
+  --warning-border: #b87521;
+  --warning-text: #fde68a;
+  --warning-countdown: #fcd34d;
   font-family: "Inter", "Segoe UI", system-ui, sans-serif;
-  background: #f5f7fb;
-  color: #1f2937;
+  background: var(--background);
+  color: var(--text);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #f5f7fb;
+  --surface: #fff;
+  --text: #1f2937;
+  --secondary-text: #4b5563;
+  --muted-text: #64748b;
+  --surface-border: #e2e8f0;
+  --drop-zone-border: #94a3b8;
+  --input-border: #cbd5f5;
+  --focus: #3b82f6;
+  --focus-shadow: rgba(59, 130, 246, 0.15);
+  --link: #2563eb;
+  --warning-background: #fef3c7;
+  --warning-border: #fbbf24;
+  --warning-text: #92400e;
+  --warning-countdown: #b45309;
 }
 
 * {
@@ -23,19 +57,58 @@ body {
   gap: 32px;
 }
 
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+}
+
 .header h1 {
   margin: 0 0 8px;
-  font-size: 2.2rem;
+  font-size: clamp(2rem, 10vw, 2.2rem);
 }
 
 .header p {
+  grid-column: 1 / -1;
   margin: 0;
-  color: #4b5563;
+  color: var(--secondary-text);
+}
+
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-border);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.theme-toggle__moon,
+:root[data-theme="light"] .theme-toggle__sun {
+  display: none;
+}
+
+:root[data-theme="light"] .theme-toggle__moon {
+  display: block;
 }
 
 .rate-limit-banner {
-  background: #fef3c7;
-  border: 1px solid #fbbf24;
+  background: var(--warning-background);
+  border: 1px solid var(--warning-border);
   border-radius: 12px;
   padding: 14px 18px;
   display: flex;
@@ -61,13 +134,13 @@ body {
 
 .rate-limit-banner__message {
   flex: 1;
-  color: #92400e;
+  color: var(--warning-text);
   font-size: 0.95rem;
 }
 
 .rate-limit-banner__message strong {
   font-weight: 700;
-  color: #b45309;
+  color: var(--warning-countdown);
 }
 
 .uploader {
@@ -76,9 +149,9 @@ body {
 }
 
 .drop-zone {
-  border: 2px dashed #94a3b8;
+  border: 2px dashed var(--drop-zone-border);
   border-radius: 18px;
-  background: #ffffff;
+  background: var(--surface);
   padding: 36px 24px;
   display: flex;
   align-items: center;
@@ -90,13 +163,12 @@ body {
 
 .drop-zone:focus,
 .drop-zone.dragover {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 4px var(--focus-shadow);
 }
 
 .drop-zone__content {
   text-align: center;
-  color: #1f2937;
 }
 
 .drop-zone__icon {
@@ -106,7 +178,7 @@ body {
 }
 
 .muted {
-  color: #6b7280;
+  color: var(--muted-text);
   font-size: 0.9rem;
 }
 
@@ -116,23 +188,30 @@ body {
 }
 
 .magnet-input__row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
 }
 
 .magnet-input input {
-  flex: 1;
   padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid #cbd5f5;
+  border: 1px solid var(--input-border);
+  background: var(--surface);
+  color: inherit;
   font-size: 0.95rem;
+}
+
+.magnet-input input::placeholder {
+  color: var(--muted-text);
+  opacity: 1;
 }
 
 .magnet-input button {
   padding: 12px 18px;
   border: none;
   border-radius: 10px;
-  background: #3b82f6;
+  background: #2563eb;
   color: #fff;
   font-weight: 600;
   cursor: pointer;
@@ -145,7 +224,6 @@ body {
 
 .status {
   font-size: 0.95rem;
-  color: #0f172a;
 }
 
 .results h2 {
@@ -158,10 +236,10 @@ body {
 }
 
 .torrent-card {
-  background: #ffffff;
+  background: var(--surface);
   border-radius: 14px;
   padding: 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--surface-border);
   display: grid;
   gap: 8px;
 }
@@ -185,7 +263,7 @@ body {
 
 .torrent-card__status {
   font-size: 0.85rem;
-  color: #64748b;
+  color: var(--muted-text);
 }
 
 .torrent-card__cancel {
@@ -204,7 +282,7 @@ body {
 
 .progress-bar {
   height: 8px;
-  background: #e2e8f0;
+  background: var(--surface-border);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -217,7 +295,7 @@ body {
 }
 
 .torrent-card__link a {
-  color: #2563eb;
+  color: var(--link);
   text-decoration: none;
   word-break: break-all;
   display: block;
