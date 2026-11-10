@@ -69,7 +69,7 @@ const renderTorrents = (torrents) => {
   torrentList.innerHTML = "";
 
   if (!torrents.length) {
-    torrentList.innerHTML = "<p class=\"muted\">No active torrents yet.</p>";
+    torrentList.innerHTML = "<p class=\"torrent-list__empty muted\">No active torrents yet.</p>";
     return;
   }
 

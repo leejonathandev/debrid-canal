@@ -49,28 +49,29 @@ body {
 
 .page {
   min-height: 100vh;
-  padding: 40px 24px 60px;
-  max-width: 960px;
+  padding: clamp(28px, 5vw, 48px) clamp(16px, 4vw, 24px) 48px;
+  max-width: 840px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 24px;
 }
 
 .header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
   column-gap: 12px;
 }
 
 .header h1 {
-  margin: 0 0 8px;
-  font-size: clamp(2rem, 10vw, 2.2rem);
+  margin: 0 0 4px;
+  font-size: clamp(1.75rem, 5vw, 2.25rem);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
 }
 
 .header p {
-  grid-column: 1 / -1;
   margin: 0;
   color: var(--secondary-text);
 }
@@ -92,7 +93,9 @@ body {
   background: var(--surface-border);
 }
 
-.theme-toggle:focus-visible {
+.theme-toggle:focus-visible,
+.drop-zone:focus-visible,
+.magnet-input :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
@@ -144,37 +147,47 @@ body {
 }
 
 .uploader {
-  display: grid;
-  gap: 16px;
+  padding: clamp(14px, 3vw, 20px);
+  border: 1px solid var(--surface-border);
+  border-radius: 16px;
+  background: var(--surface);
 }
 
 .drop-zone {
-  border: 2px dashed var(--drop-zone-border);
-  border-radius: 18px;
-  background: var(--surface);
-  padding: 36px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 100%;
+  padding: 22px 16px;
+  border: 1px dashed var(--drop-zone-border);
+  border-radius: 12px;
+  background: var(--background);
+  color: inherit;
+  font: inherit;
+  line-height: 1.4;
+  text-align: center;
+  text-wrap: balance;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
   cursor: pointer;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  outline: none;
 }
 
-.drop-zone:focus,
+.drop-zone:hover,
 .drop-zone.dragover {
   border-color: var(--focus);
+}
+
+.drop-zone.dragover {
   box-shadow: 0 0 0 4px var(--focus-shadow);
 }
 
-.drop-zone__content {
-  text-align: center;
-}
-
 .drop-zone__icon {
-  font-size: 2rem;
-  display: block;
-  margin-bottom: 8px;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 4px;
+  padding: 9px;
+  border-radius: 10px;
+  background: var(--focus-shadow);
+  color: var(--link);
 }
 
 .muted {
@@ -185,6 +198,12 @@ body {
 .magnet-input {
   display: grid;
   gap: 8px;
+  margin-top: 16px;
+}
+
+.magnet-input label {
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .magnet-input__row {
@@ -194,12 +213,14 @@ body {
 }
 
 .magnet-input input {
-  padding: 12px 14px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--input-border);
-  background: var(--surface);
+  background: var(--background);
   color: inherit;
-  font-size: 0.95rem;
+  font: inherit;
 }
 
 .magnet-input input::placeholder {
@@ -208,13 +229,19 @@ body {
 }
 
 .magnet-input button {
-  padding: 12px 18px;
+  padding: 10px 16px;
   border: none;
   border-radius: 10px;
   background: #2563eb;
   color: #fff;
+  font: inherit;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.magnet-input button:hover:enabled {
+  background: #1d4ed8;
 }
 
 .magnet-input button:disabled {
@@ -223,16 +250,29 @@ body {
 }
 
 .status {
-  font-size: 0.95rem;
+  color: var(--secondary-text);
+  font-size: 0.875rem;
+}
+
+.status:not(:empty) {
+  margin-top: 12px;
 }
 
 .results h2 {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
+  font-size: 1.125rem;
 }
 
 .torrent-list {
   display: grid;
   gap: 12px;
+}
+
+.torrent-list__empty {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--surface-border);
+  border-radius: 12px;
 }
 
 .torrent-card {
@@ -246,8 +286,8 @@ body {
 
 .torrent-card__header {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   align-items: center;
 }
 
@@ -255,10 +295,12 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-inline-start: auto;
 }
 
 .torrent-card__name {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .torrent-card__status {
