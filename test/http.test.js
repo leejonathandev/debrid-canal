@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import request from "supertest";
 import session from "express-session";
 import { io as connect } from "socket.io-client";
@@ -144,6 +145,28 @@ test("simultaneous HTTP uploads do not overwrite each other during response fina
   assert.equal((await agent.get("/api/torrents").expect(200)).body.length, 3);
 });
 
+test("repeat submissions preserve a tracked torrent and its download cleanup IDs", async t => {
+  const { agent, calls } = setup(t, { service: {
+    addTorrentToRealDebrid: async () => ({ id: "magnet", status: "queued", progress: 0 }),
+    refreshTorrentInfo: async torrent => ({
+      ...torrent, status: "downloaded", progress: 100, linksPending: false,
+      downloadId: "legacy", unrestrictedLink: "https://example.test/legacy",
+      unrestrictedLinks: [{ downloadId: "file-a", url: "https://example.test/a" }]
+    })
+  } });
+  const csrf = await token(agent);
+  await agent.post("/api/torrents/magnet").set("CSRF-Token", csrf).send({ magnet }).expect(201);
+  const completed = (await agent.post("/api/torrents/magnet/refresh").set("CSRF-Token", csrf).expect(200)).body;
+  const repeatedMagnet = await agent.post("/api/torrents/magnet").set("CSRF-Token", csrf).send({ magnet }).expect(201);
+  const repeatedFile = await agent.post("/api/torrents/upload").set("CSRF-Token", csrf)
+    .attach("torrent", Buffer.from("d4:infodee"), "repeat.torrent").expect(201);
+  assert.deepEqual(repeatedMagnet.body, completed);
+  assert.deepEqual(repeatedFile.body, completed);
+  assert.deepEqual((await agent.get("/api/torrents").expect(200)).body, [completed]);
+  await agent.delete("/api/torrents/magnet").set("CSRF-Token", csrf).expect(204);
+  assert.deepEqual(calls, ["torrent:magnet", "download:legacy", "download:file-a"]);
+});
+
 test("HTTP cancellation waits for an in-flight refresh and removes newly created download IDs", async t => {
   let entered;
   let release;
@@ -191,6 +214,47 @@ test("websocket and polling connections use the HTTP session and receive only th
   assert.equal(leaked, false);
   a.socket.disconnect();
   b.socket.disconnect();
+});
+
+test("HTTP and WebSocket reads return saved state while a poll waits on Real-Debrid", { timeout: 10000 }, async t => {
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const { agent, httpServer, poller } = setup(t, { service: {
+    refreshTorrentInfo: async torrent => {
+      entered.resolve();
+      await release.promise;
+      return { ...torrent, status: "downloading", progress: 50 };
+    }
+  } });
+  const url = await listen(httpServer);
+  const first = await agent.get("/api/csrf-token").expect(200);
+  const cookie = first.headers["set-cookie"].map(value => value.split(";")[0]).join("; ");
+  await agent.post("/api/torrents/magnet").set("CSRF-Token", first.body.csrfToken).send({ magnet }).expect(201);
+  const before = (await agent.get("/api/torrents/state").expect(200)).body;
+  const polling = poller.poll();
+  try {
+    await entered.promise;
+    const [list, state, bootstrap, live] = await Promise.all([
+      agent.get("/api/torrents").timeout(3000).expect(200),
+      agent.get("/api/torrents/state").timeout(3000).expect(200),
+      agent.get("/api/csrf-token").timeout(3000).expect(200),
+      socketState(t, url, cookie)
+    ]);
+    assert.deepEqual(list.body, before.torrents);
+    assert.deepEqual(state.body, before);
+    assert.deepEqual(bootstrap.body.state, before);
+    assert.deepEqual(live.state, before);
+
+    const updated = once(live.socket, "torrents-updated", { signal: AbortSignal.timeout(3000) });
+    release.resolve();
+    const [snapshot] = await updated;
+    assert.equal(snapshot.revision, before.revision + 1);
+    assert.equal(snapshot.torrents[0].progress, 50);
+    live.socket.disconnect();
+  } finally {
+    release.resolve();
+    await polling;
+  }
 });
 
 test("Socket.IO refuses clients without a pre-established HTTP session", async t => {

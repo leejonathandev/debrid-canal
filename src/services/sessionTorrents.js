@@ -31,16 +31,15 @@ export class SessionTorrents {
     finally { if (this.locks.get(id) === current) this.locks.delete(id); }
   }
 
+  // Reads can serve the last committed state while a writer waits on Real-Debrid.
   async read(id) {
-    return this.locked(id, async () => (await callStore(this.store, "get", id))?.torrents || []);
+    return (await callStore(this.store, "get", id))?.torrents || [];
   }
 
   async snapshot(id) {
-    return this.locked(id, async () => {
-      const session = await callStore(this.store, "get", id);
-      if (!session) throw Object.assign(new Error("Session expired. Please reconnect."), { status: 410 });
-      return torrentSnapshot(session);
-    });
+    const session = await callStore(this.store, "get", id);
+    if (!session) throw Object.assign(new Error("Session expired. Please reconnect."), { status: 410 });
+    return torrentSnapshot(session);
   }
 
   async mutate(id, action) {

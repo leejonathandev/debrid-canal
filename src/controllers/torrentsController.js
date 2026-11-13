@@ -9,11 +9,14 @@ export function createTorrentsController({ service, sessions, poller }) {
     let torrent;
     await sessions.mutate(req.sessionID, async torrents => {
       const result = await operation();
+      // Real-Debrid can return the ID of a torrent this session already tracks.
+      torrent = torrents.find(item => item.id === result.id);
+      if (torrent) return torrents;
+
       torrent = {
         ...result, inputType, addedAt: new Date().toISOString(), error: null
       };
-      // Some magnets resolve to an existing account torrent ID.
-      return [torrent, ...torrents.filter(item => item.id !== torrent.id)];
+      return [torrent, ...torrents];
     });
     void poller.triggerImmediatePoll();
     res.status(201).json(torrent);

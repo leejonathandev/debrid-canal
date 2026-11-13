@@ -14,7 +14,7 @@ import { createTorrentsRouter } from "./routes/torrents.js";
 import { createRealDebridService } from "./services/realdebrid.js";
 import { PollingService } from "./services/pollingService.js";
 import { RateLimitMonitor } from "./services/rateLimitMonitor.js";
-import { SessionTorrents, callStore, torrentSnapshot } from "./services/sessionTorrents.js";
+import { SessionTorrents, callStore } from "./services/sessionTorrents.js";
 import { SqliteSessionStore } from "./services/sqliteSessionStore.js";
 import { resolveSessionSecret, positiveInteger, resolveTrustProxy } from "./config.js";
 import logger from "./utils/logger.js";
@@ -116,13 +116,10 @@ export function createApplication({ env = process.env, service, monitor = new Ra
   io.on("connection", async socket => {
     try {
       const id = socket.request.sessionID;
-      // The same lock orders initial state before later broadcasts.
-      await sessions.locked(id, async () => {
-        const stored = await callStore(sessionStore, "get", id);
-        if (!stored) { socket.disconnect(true); return; }
-        socket.join(id);
-        socket.emit("torrents-updated", torrentSnapshot(stored));
-      });
+      // Join before reading so commits during the read reach the client. The
+      // client compares revisions if a live update arrives before the snapshot.
+      await socket.join(id);
+      socket.emit("torrents-updated", await sessions.snapshot(id));
     } catch { socket.disconnect(true); }
   });
   // Prune idle sessions even when polling has stopped, without extending expiry.

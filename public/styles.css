@@ -308,6 +308,12 @@ body {
   color: var(--muted-text);
 }
 
+.torrent-card__error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--warning-text);
+}
+
 .torrent-card__cancel {
   border: none;
   background: transparent;

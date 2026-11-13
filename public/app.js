@@ -42,7 +42,7 @@ const renderDownloadLinks = (torrent) => {
     return `<a href="${escapeHtml(torrent.unrestrictedLink)}" target="_blank" rel="noopener">Download</a>`;
   }
 
-  return "Waiting for unrestricted link...";
+  return "";
 };
 
 const uploadTorrent = async (file) => {
@@ -65,6 +65,8 @@ const cancelTorrent = async (torrentId) => {
   return client.mutate(`/api/torrents/${encodeURIComponent(torrentId)}`, { method: "DELETE" });
 };
 
+const terminalStatuses = new Set(["magnet_error", "error", "virus", "dead"]);
+
 const renderTorrents = (torrents) => {
   torrentList.innerHTML = "";
 
@@ -77,6 +79,9 @@ const renderTorrents = (torrents) => {
     const card = document.createElement("div");
     card.className = "torrent-card";
     const isDownloaded = torrent.status === "downloaded";
+    const errorMessage = torrent.error ||
+      (terminalStatuses.has(torrent.status) ? "Real-Debrid could not complete this torrent." : "");
+    const linkContent = renderDownloadLinks(torrent) || (errorMessage ? "" : "Waiting for unrestricted link...");
 
     const progressPercent = Math.min(100, Math.max(0, Number(torrent.progress)));
 
@@ -91,9 +96,8 @@ const renderTorrents = (torrents) => {
         <div class="progress-bar__fill" style="width: ${progressPercent}%"></div>
       </div>
       <div class="torrent-card__status">Progress: ${progressPercent}%</div>
-      <div class="torrent-card__link">
-        ${renderDownloadLinks(torrent)}
-      </div>
+      ${errorMessage ? `<p class="torrent-card__error">${escapeHtml(errorMessage)}</p>` : ""}
+      ${linkContent ? `<div class="torrent-card__link">${linkContent}</div>` : ""}
     `;
 
     const cancelButton = document.createElement("button");
